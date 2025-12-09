@@ -1,0 +1,165 @@
+# Photo Metadata Analysis System Configuration
+# ==============================================
+
+# Database Configuration
+# ----------------------
+database:
+  # Type: sqlite, postgresql, mysql
+  type: sqlite
+  
+  # SQLite Configuration (local)
+  sqlite:
+    path: metadata.db
+    backup_enabled: true
+    backup_path: backups/
+  
+  # PostgreSQL Configuration (cloud-ready)
+  postgresql:
+    host: localhost
+    port: 5432
+    database: photo_metadata
+    user: ${DB_USER}  # Use environment variables for credentials
+    password: ${DB_PASSWORD}
+    # For cloud: use connection string
+    # connection_string: ${DATABASE_URL}
+  
+  # MySQL Configuration (cloud-ready)
+  mysql:
+    host: localhost
+    port: 3306
+    database: photo_metadata
+    user: ${DB_USER}
+    password: ${DB_PASSWORD}
+
+# Storage Configuration
+# ---------------------
+storage:
+  # Type: local, s3, azure, gcs
+  type: local
+  
+  # Local Storage
+  local:
+    metadata_json_path: metadata_analysis_test/
+    photos_base_path: null  # Set to base path if photos are in consistent location
+  
+  # AWS S3 Configuration
+  s3:
+    bucket: ${S3_BUCKET}
+    region: us-east-1
+    access_key_id: ${AWS_ACCESS_KEY_ID}
+    secret_access_key: ${AWS_SECRET_ACCESS_KEY}
+    metadata_prefix: metadata_json/
+    photos_prefix: photos/
+  
+  # Azure Blob Storage
+  azure:
+    account_name: ${AZURE_STORAGE_ACCOUNT}
+    account_key: ${AZURE_STORAGE_KEY}
+    container: photo-metadata
+    metadata_prefix: metadata_json/
+    photos_prefix: photos/
+  
+  # Google Cloud Storage
+  gcs:
+    project_id: ${GCP_PROJECT_ID}
+    bucket: ${GCS_BUCKET}
+    credentials_path: ${GOOGLE_APPLICATION_CREDENTIALS}
+    metadata_prefix: metadata_json/
+    photos_prefix: photos/
+
+# Analysis Configuration
+# ----------------------
+analysis:
+  # Enable caching of aggregated statistics
+  enable_caching: true
+  
+  # Automatically calculate hit rate (requires RAW folder detection)
+  calculate_hit_rate: true
+  
+  # Lens classification
+  lens_classification:
+    # Lenses considered "prime" based on name patterns
+    prime_patterns:
+      - "FE \\d+mm F[\\d.]+"
+      - "\\d+mm F[\\d.]+ (?!DG DN)"
+    # Lenses considered "zoom" based on name patterns  
+    zoom_patterns:
+      - "\\d+-\\d+mm"
+  
+  # Additional metrics to calculate
+  metrics:
+    - lens_frequency
+    - shutter_speed_distribution
+    - aperture_distribution
+    - iso_distribution
+    - exposure_program
+    - flash_mode
+    - focal_length_distribution
+    - exposure_bias_distribution
+    - time_of_day_analysis  # If timestamp available
+
+# Reporting Configuration
+# -----------------------
+reporting:
+  # Output directory for text reports
+  text_reports_path: metadata_analysis/
+  
+  # Maintain backward compatibility with existing file format
+  backward_compatible: true
+  
+  # Additional export formats
+  export_formats:
+    - text
+    - json
+    - csv
+    # - html  # Future enhancement
+  
+  # Include in reports
+  include:
+    hit_rate: true
+    lens_breakdown: true
+    overall_metrics: true
+    prime_vs_zoom: true
+
+# Extraction Configuration
+# ------------------------
+extraction:
+  # ExifTool configuration
+  exiftool_path: exiftool  # Or full path to exiftool executable
+  
+  # Supported file extensions
+  supported_extensions:
+    - .arw
+    - .jpg
+    - .jpeg
+    - .png
+    - .gif
+    - .bmp
+    - .tiff
+    - .webp
+  
+  # Incremental updates: only reprocess changed files
+  incremental: true
+  
+  # Track file modification times
+  track_mtime: true
+
+# Migration Configuration
+# -----------------------
+migration:
+  # Source directory for existing JSON files
+  json_source_path: metadata_json/
+  
+  # Validate data during migration
+  validate: true
+  
+  # Skip files that already exist in database
+  skip_existing: true
+
+# Logging Configuration
+# ---------------------
+logging:
+  level: INFO  # DEBUG, INFO, WARNING, ERROR, CRITICAL
+  format: '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+  file: logs/photo_metadata.log
+  console: true

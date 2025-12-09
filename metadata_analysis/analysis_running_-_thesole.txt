@@ -1,0 +1,456 @@
+Analysis: running - thesole
+================================================================================
+Category: running
+Group: thesole
+
+Total photos analyzed: 2573
+
+================================================================================
+
+OVERALL METRICS
+--------------------------------------------------------------------------------
+
+Hit Rate: 33.15%
+  Total: 2573
+  RAW: 7762
+  Edited: 2573
+
+Lens Type Distribution:
+  Prime Lenses: 1706 photos (66.3%)
+    - FE 85mm F1.4 GM II: 1185 photos
+    - FE 135mm F1.8 GM: 452 photos
+    - FE 35mm F1.4 GM: 46 photos
+    - FE 85mm F1.4 GM: 23 photos
+    - 24.0 mm f/1.7: 2 photos
+  Zoom Lenses: 865 photos (33.6%)
+    - 70-200mm F2.8 DG DN OS | Sports 023: 650 photos
+    - 24-70mm F2.8 DG DN | Art 019: 206 photos
+    - FE 200-600mm F5.6-6.3 G OSS + 1.4X Teleconverter: 8 photos
+    - FE 200-600mm F5.6-6.3 G OSS: 1 photos
+
+Overall Shutter Speed Distribution:
+  1/1000: 89 times (3.5%)
+  1/800: 87 times (3.4%)
+  1/640: 95 times (3.7%)
+  1/500: 219 times (8.5%)
+  1/400: 226 times (8.8%)
+  1/320: 175 times (6.8%)
+  1/250: 626 times (24.3%)
+  1/200: 354 times (13.8%)
+  1/160: 37 times (1.4%)
+  1/125: 339 times (13.2%)
+  1/100: 47 times (1.8%)
+  1/80: 33 times (1.3%)
+  1/60: 7 times (0.3%)
+  1/50: 50 times (1.9%)
+  1/40: 11 times (0.4%)
+  1/30: 21 times (0.8%)
+  1/25: 1 times (0.0%)
+  1/20: 71 times (2.8%)
+  1/15: 70 times (2.7%)
+  1/13: 1 times (0.0%)
+  1/10: 4 times (0.2%)
+  1/6: 2 times (0.1%)
+  1/5: 8 times (0.3%)
+
+Overall Aperture Distribution:
+  f/1.4: 863 times (33.5%)
+  f/1.6: 15 times (0.6%)
+  f/1.7: 2 times (0.1%)
+  f/1.8: 478 times (18.6%)
+  f/2.0: 17 times (0.7%)
+  f/2.2: 8 times (0.3%)
+  f/2.5: 14 times (0.5%)
+  f/2.8: 577 times (22.4%)
+  f/3.2: 25 times (1.0%)
+  f/3.5: 18 times (0.7%)
+  f/4.0: 122 times (4.7%)
+  f/4.5: 50 times (1.9%)
+  f/5.0: 30 times (1.2%)
+  f/5.6: 251 times (9.8%)
+  f/6.3: 38 times (1.5%)
+  f/7.1: 26 times (1.0%)
+  f/8.0: 25 times (1.0%)
+  f/9.0: 8 times (0.3%)
+  f/22.0: 6 times (0.2%)
+
+Overall ISO Distribution:
+  ISO 80: 19 times (0.7%)
+  ISO 100: 23 times (0.9%)
+  ISO 110: 1 times (0.0%)
+  ISO 125: 33 times (1.3%)
+  ISO 160: 41 times (1.6%)
+  ISO 200: 60 times (2.3%)
+  ISO 250: 43 times (1.7%)
+  ISO 320: 52 times (2.0%)
+  ISO 340: 1 times (0.0%)
+  ISO 400: 96 times (3.7%)
+  ISO 500: 40 times (1.6%)
+  ISO 640: 43 times (1.7%)
+  ISO 800: 138 times (5.4%)
+  ISO 1000: 44 times (1.7%)
+  ISO 1250: 48 times (1.9%)
+  ISO 1600: 294 times (11.4%)
+  ISO 2000: 54 times (2.1%)
+  ISO 2500: 58 times (2.3%)
+  ISO 3200: 598 times (23.2%)
+  ISO 4000: 119 times (4.6%)
+  ISO 5000: 119 times (4.6%)
+  ISO 6400: 413 times (16.1%)
+  ISO 8000: 27 times (1.0%)
+  ISO 10000: 85 times (3.3%)
+  ISO 12800: 99 times (3.8%)
+  ISO 20000: 1 times (0.0%)
+  ISO 25600: 2 times (0.1%)
+  ISO 51200: 2 times (0.1%)
+  ISO 65535: 20 times (0.8%)
+
+Overall Exposure Program Distribution:
+  Manual: 2546 times (99.0%)
+  Shutter priority: 27 times (1.0%)
+
+Overall Flash Mode Distribution:
+  Flash off, no flash function: 1714 times (66.6%)
+  Unknown (15): 857 times (33.3%)
+  Unknown (32): 2 times (0.1%)
+
+================================================================================
+DETAILED BREAKDOWN BY LENS
+================================================================================
+
+--------------------------------------------------------------------------------
+Lens: 24-70mm F2.8 DG DN | Art 019 (Used 206 times)
+--------------------------------------------------------------------------------
+Shutter Speeds:
+  1/1000: 1 times (0.5%)
+  1/800: 4 times (1.9%)
+  1/500: 4 times (1.9%)
+  1/400: 5 times (2.4%)
+  1/320: 13 times (6.3%)
+  1/250: 21 times (10.2%)
+  1/200: 21 times (10.2%)
+  1/160: 11 times (5.3%)
+  1/125: 35 times (17.0%)
+  1/100: 10 times (4.9%)
+  1/80: 9 times (4.4%)
+  1/60: 1 times (0.5%)
+  1/50: 50 times (24.3%)
+  1/30: 1 times (0.5%)
+  1/25: 1 times (0.5%)
+  1/15: 17 times (8.3%)
+  1/6: 2 times (1.0%)
+Apertures:
+  f/2.8: 195 times (94.7%)
+  f/4.0: 4 times (1.9%)
+  f/4.5: 4 times (1.9%)
+  f/5.0: 2 times (1.0%)
+  f/22.0: 1 times (0.5%)
+ISOs:
+  ISO 80: 1 times (0.5%)
+  ISO 400: 5 times (2.4%)
+  ISO 500: 3 times (1.5%)
+  ISO 640: 5 times (2.4%)
+  ISO 800: 6 times (2.9%)
+  ISO 1000: 4 times (1.9%)
+  ISO 1250: 5 times (2.4%)
+  ISO 1600: 31 times (15.0%)
+  ISO 2000: 4 times (1.9%)
+  ISO 3200: 65 times (31.6%)
+  ISO 4000: 2 times (1.0%)
+  ISO 5000: 1 times (0.5%)
+  ISO 6400: 56 times (27.2%)
+  ISO 8000: 2 times (1.0%)
+  ISO 10000: 7 times (3.4%)
+  ISO 12800: 8 times (3.9%)
+  ISO 20000: 1 times (0.5%)
+Exposure Programs:
+  Manual: 206 times (100.0%)
+Flash Modes:
+  Flash off, no flash function: 191 times (92.7%)
+  Unknown (15): 15 times (7.3%)
+
+--------------------------------------------------------------------------------
+Lens: FE 135mm F1.8 GM (Used 452 times)
+--------------------------------------------------------------------------------
+Shutter Speeds:
+  1/1000: 35 times (7.7%)
+  1/800: 33 times (7.3%)
+  1/640: 38 times (8.4%)
+  1/500: 74 times (16.4%)
+  1/400: 46 times (10.2%)
+  1/320: 16 times (3.5%)
+  1/250: 124 times (27.4%)
+  1/200: 50 times (11.1%)
+  1/125: 17 times (3.8%)
+  1/100: 10 times (2.2%)
+  1/80: 1 times (0.2%)
+  1/20: 6 times (1.3%)
+  1/10: 2 times (0.4%)
+Apertures:
+  f/1.8: 401 times (88.7%)
+  f/2.0: 6 times (1.3%)
+  f/2.8: 1 times (0.2%)
+  f/3.2: 2 times (0.4%)
+  f/3.5: 4 times (0.9%)
+  f/4.0: 22 times (4.9%)
+  f/4.5: 16 times (3.5%)
+ISOs:
+  ISO 80: 7 times (1.5%)
+  ISO 100: 15 times (3.3%)
+  ISO 125: 22 times (4.9%)
+  ISO 160: 21 times (4.6%)
+  ISO 200: 23 times (5.1%)
+  ISO 250: 17 times (3.8%)
+  ISO 320: 18 times (4.0%)
+  ISO 400: 19 times (4.2%)
+  ISO 500: 7 times (1.5%)
+  ISO 640: 4 times (0.9%)
+  ISO 800: 5 times (1.1%)
+  ISO 1000: 6 times (1.3%)
+  ISO 1250: 4 times (0.9%)
+  ISO 1600: 10 times (2.2%)
+  ISO 2000: 3 times (0.7%)
+  ISO 3200: 108 times (23.9%)
+  ISO 4000: 9 times (2.0%)
+  ISO 5000: 20 times (4.4%)
+  ISO 6400: 62 times (13.7%)
+  ISO 8000: 1 times (0.2%)
+  ISO 10000: 7 times (1.5%)
+  ISO 12800: 41 times (9.1%)
+  ISO 25600: 1 times (0.2%)
+  ISO 51200: 2 times (0.4%)
+  ISO 65535: 20 times (4.4%)
+Exposure Programs:
+  Manual: 452 times (100.0%)
+Flash Modes:
+  Flash off, no flash function: 320 times (70.8%)
+  Unknown (15): 132 times (29.2%)
+
+--------------------------------------------------------------------------------
+Lens: FE 85mm F1.4 GM (Used 23 times)
+--------------------------------------------------------------------------------
+Shutter Speeds:
+  1/320: 1 times (4.3%)
+  1/200: 14 times (60.9%)
+  1/160: 7 times (30.4%)
+  1/80: 1 times (4.3%)
+Apertures:
+  f/1.4: 23 times (100.0%)
+ISOs:
+  ISO 400: 14 times (60.9%)
+  ISO 1600: 8 times (34.8%)
+  ISO 3200: 1 times (4.3%)
+Exposure Programs:
+  Manual: 23 times (100.0%)
+Flash Modes:
+  Flash off, no flash function: 23 times (100.0%)
+
+--------------------------------------------------------------------------------
+Lens: 70-200mm F2.8 DG DN OS | Sports 023 (Used 650 times)
+--------------------------------------------------------------------------------
+Shutter Speeds:
+  1/1000: 45 times (6.9%)
+  1/800: 45 times (6.9%)
+  1/500: 28 times (4.3%)
+  1/400: 106 times (16.3%)
+  1/320: 80 times (12.3%)
+  1/250: 142 times (21.8%)
+  1/200: 102 times (15.7%)
+  1/160: 1 times (0.2%)
+  1/125: 63 times (9.7%)
+  1/100: 13 times (2.0%)
+  1/60: 5 times (0.8%)
+  1/40: 1 times (0.2%)
+  1/30: 1 times (0.2%)
+  1/15: 16 times (2.5%)
+  1/10: 2 times (0.3%)
+Apertures:
+  f/2.8: 366 times (56.3%)
+  f/3.2: 22 times (3.4%)
+  f/3.5: 5 times (0.8%)
+  f/4.0: 31 times (4.8%)
+  f/4.5: 21 times (3.2%)
+  f/5.0: 5 times (0.8%)
+  f/5.6: 128 times (19.7%)
+  f/6.3: 29 times (4.5%)
+  f/7.1: 16 times (2.5%)
+  f/8.0: 22 times (3.4%)
+  f/22.0: 5 times (0.8%)
+ISOs:
+  ISO 80: 2 times (0.3%)
+  ISO 100: 5 times (0.8%)
+  ISO 125: 5 times (0.8%)
+  ISO 160: 6 times (0.9%)
+  ISO 200: 8 times (1.2%)
+  ISO 250: 10 times (1.5%)
+  ISO 320: 8 times (1.2%)
+  ISO 400: 12 times (1.8%)
+  ISO 500: 13 times (2.0%)
+  ISO 640: 12 times (1.8%)
+  ISO 800: 26 times (4.0%)
+  ISO 1000: 17 times (2.6%)
+  ISO 1250: 21 times (3.2%)
+  ISO 1600: 60 times (9.2%)
+  ISO 2000: 27 times (4.2%)
+  ISO 2500: 44 times (6.8%)
+  ISO 3200: 121 times (18.6%)
+  ISO 4000: 43 times (6.6%)
+  ISO 5000: 23 times (3.5%)
+  ISO 6400: 140 times (21.5%)
+  ISO 8000: 8 times (1.2%)
+  ISO 10000: 35 times (5.4%)
+  ISO 12800: 3 times (0.5%)
+  ISO 25600: 1 times (0.2%)
+Exposure Programs:
+  Manual: 649 times (99.8%)
+  Shutter priority: 1 times (0.2%)
+Flash Modes:
+  Flash off, no flash function: 514 times (79.1%)
+  Unknown (15): 136 times (20.9%)
+
+--------------------------------------------------------------------------------
+Lens: FE 85mm F1.4 GM II (Used 1185 times)
+--------------------------------------------------------------------------------
+Shutter Speeds:
+  1/1000: 8 times (0.7%)
+  1/800: 5 times (0.4%)
+  1/640: 57 times (4.8%)
+  1/500: 113 times (9.5%)
+  1/400: 61 times (5.1%)
+  1/320: 65 times (5.5%)
+  1/250: 314 times (26.5%)
+  1/200: 157 times (13.2%)
+  1/160: 6 times (0.5%)
+  1/125: 224 times (18.9%)
+  1/100: 14 times (1.2%)
+  1/80: 22 times (1.9%)
+  1/60: 1 times (0.1%)
+  1/40: 10 times (0.8%)
+  1/30: 19 times (1.6%)
+  1/20: 64 times (5.4%)
+  1/15: 36 times (3.0%)
+  1/13: 1 times (0.1%)
+  1/5: 8 times (0.7%)
+Apertures:
+  f/1.4: 794 times (67.0%)
+  f/1.6: 15 times (1.3%)
+  f/1.8: 77 times (6.5%)
+  f/2.0: 11 times (0.9%)
+  f/2.2: 8 times (0.7%)
+  f/2.5: 14 times (1.2%)
+  f/2.8: 15 times (1.3%)
+  f/3.2: 1 times (0.1%)
+  f/3.5: 9 times (0.8%)
+  f/4.0: 65 times (5.5%)
+  f/4.5: 9 times (0.8%)
+  f/5.0: 23 times (1.9%)
+  f/5.6: 123 times (10.4%)
+  f/6.3: 8 times (0.7%)
+  f/7.1: 10 times (0.8%)
+  f/8.0: 3 times (0.3%)
+ISOs:
+  ISO 80: 9 times (0.8%)
+  ISO 100: 3 times (0.3%)
+  ISO 125: 6 times (0.5%)
+  ISO 160: 14 times (1.2%)
+  ISO 200: 29 times (2.4%)
+  ISO 250: 16 times (1.4%)
+  ISO 320: 26 times (2.2%)
+  ISO 400: 46 times (3.9%)
+  ISO 500: 17 times (1.4%)
+  ISO 640: 21 times (1.8%)
+  ISO 800: 100 times (8.4%)
+  ISO 1000: 15 times (1.3%)
+  ISO 1250: 13 times (1.1%)
+  ISO 1600: 184 times (15.5%)
+  ISO 2000: 19 times (1.6%)
+  ISO 2500: 12 times (1.0%)
+  ISO 3200: 289 times (24.4%)
+  ISO 4000: 56 times (4.7%)
+  ISO 5000: 67 times (5.7%)
+  ISO 6400: 149 times (12.6%)
+  ISO 8000: 12 times (1.0%)
+  ISO 10000: 35 times (3.0%)
+  ISO 12800: 47 times (4.0%)
+Exposure Programs:
+  Manual: 1185 times (100.0%)
+Flash Modes:
+  Flash off, no flash function: 620 times (52.3%)
+  Unknown (15): 565 times (47.7%)
+
+--------------------------------------------------------------------------------
+Lens: FE 200-600mm F5.6-6.3 G OSS + 1.4X Teleconverter (Used 8 times)
+--------------------------------------------------------------------------------
+Shutter Speeds:
+  1/400: 7 times (87.5%)
+  1/250: 1 times (12.5%)
+Apertures:
+  f/9.0: 8 times (100.0%)
+ISOs:
+  ISO 4000: 1 times (12.5%)
+  ISO 6400: 4 times (50.0%)
+  ISO 8000: 2 times (25.0%)
+  ISO 10000: 1 times (12.5%)
+Exposure Programs:
+  Manual: 8 times (100.0%)
+Flash Modes:
+  Flash off, no flash function: 8 times (100.0%)
+
+--------------------------------------------------------------------------------
+Lens: FE 200-600mm F5.6-6.3 G OSS (Used 1 times)
+--------------------------------------------------------------------------------
+Shutter Speeds:
+  1/400: 1 times (100.0%)
+Apertures:
+  f/6.3: 1 times (100.0%)
+ISOs:
+  ISO 8000: 1 times (100.0%)
+Exposure Programs:
+  Manual: 1 times (100.0%)
+Flash Modes:
+  Flash off, no flash function: 1 times (100.0%)
+
+--------------------------------------------------------------------------------
+Lens: 24.0 mm f/1.7 (Used 2 times)
+--------------------------------------------------------------------------------
+Shutter Speeds:
+  1/20: 1 times (50.0%)
+  1/15: 1 times (50.0%)
+Apertures:
+  f/1.7: 2 times (100.0%)
+ISOs:
+  ISO 110: 1 times (50.0%)
+  ISO 340: 1 times (50.0%)
+Exposure Programs:
+  Manual: 2 times (100.0%)
+Flash Modes:
+  Unknown (32): 2 times (100.0%)
+
+--------------------------------------------------------------------------------
+Lens: FE 35mm F1.4 GM (Used 46 times)
+--------------------------------------------------------------------------------
+Shutter Speeds:
+  1/250: 24 times (52.2%)
+  1/200: 10 times (21.7%)
+  1/160: 12 times (26.1%)
+Apertures:
+  f/1.4: 46 times (100.0%)
+ISOs:
+  ISO 640: 1 times (2.2%)
+  ISO 800: 1 times (2.2%)
+  ISO 1000: 2 times (4.3%)
+  ISO 1250: 5 times (10.9%)
+  ISO 1600: 1 times (2.2%)
+  ISO 2000: 1 times (2.2%)
+  ISO 2500: 2 times (4.3%)
+  ISO 3200: 14 times (30.4%)
+  ISO 4000: 8 times (17.4%)
+  ISO 5000: 8 times (17.4%)
+  ISO 6400: 2 times (4.3%)
+  ISO 8000: 1 times (2.2%)
+Exposure Programs:
+  Manual: 20 times (43.5%)
+  Shutter priority: 26 times (56.5%)
+Flash Modes:
+  Flash off, no flash function: 37 times (80.4%)
+  Unknown (15): 9 times (19.6%)

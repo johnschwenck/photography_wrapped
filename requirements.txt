@@ -1,0 +1,34 @@
+# Photo Metadata Analysis System - Requirements
+# ==============================================
+
+# Core Dependencies
+# -----------------
+PyYAML>=6.0
+pyexiftool>=0.5.5
+
+# Cloud Storage Support (Optional)
+# --------------------------------
+# AWS S3
+boto3>=1.28.0
+
+# Azure Blob Storage
+azure-storage-blob>=12.19.0
+
+# Google Cloud Storage
+google-cloud-storage>=2.10.0
+
+# Database Support (Optional - for PostgreSQL/MySQL)
+# --------------------------------------------------
+# PostgreSQL
+psycopg2-binary>=2.9.9
+
+# MySQL
+mysql-connector-python>=8.2.0
+
+# Development Dependencies
+# ------------------------
+pytest>=7.4.0
+pytest-cov>=4.1.0
+black>=23.0.0
+flake8>=6.1.0
+mypy>=1.7.0
