@@ -1,76 +1,165 @@
-# Photo Metadata Analysis System
+# Photographer Wrapped
 
-A comprehensive, object-oriented system for analyzing EXIF metadata from photography sessions with support for local and cloud storage, centralized database, and flexible reporting.
+Analyze your photography metadata and see your year in review - like Spotify Wrapped, but for photographers.
 
-## 🌟 Features
+## What It Does
 
-### Core Capabilities
-- **EXIF Extraction**: Extract comprehensive metadata from various image formats (.arw, .jpg, .png, etc.)
-- **Centralized Database**: SQLite with easy migration to PostgreSQL/MySQL for cloud deployments
-- **Cloud Storage Support**: Seamless integration with AWS S3, Azure Blob Storage, and Google Cloud Storage
-- **OOP Architecture**: Clean, maintainable code with proper separation of concerns
-- **Flexible Analysis**: Analyze at session, group, or category levels with automatic aggregation
-- **Hit Rate Calculation**: Track editing efficiency (edited photos / RAW photos)
-- **Comprehensive Statistics**: Lens usage, camera settings distributions, exposure patterns
-- **Backward Compatible**: Maintains existing text report format
+Extract EXIF data from your photos, analyze your shooting patterns, and get insights about your photography progression over time.
 
-### New in v2.0 (Refactored Architecture)
-- ✨ Object-oriented design with clear domain models
-- 🗄️ Centralized SQLite database (cloud-ready)
-- ☁️ Cloud storage abstraction layer (S3, Azure, GCS)
-- 📊 Pre-calculated statistics with caching
-- 🔍 Flexible querying and filtering
-- 🚀 Command-line interface for automation
-- 📦 Modular architecture for easy extension
-- 📝 Comprehensive documentation with type hints
+**Key Features:**
+- Extract metadata from RAW and JPG files
+- Calculate hit rate (edited photos / total RAW photos)
+- Analyze lens usage, camera settings, shooting patterns
+- Temporal trend analysis (see your progression throughout the year)
+- Generate "Wrapped" style year-in-review reports
+- Local processing (photos never leave your computer)
+- Clean OOP architecture with centralized SQLite database
 
-## 🏗️ Architecture
+## Project Structure
 
 ```
-RunClubSocialHub/
-├── models/              # Domain models (PhotoMetadata, Session, Lens, etc.)
-├── database/            # Database schema and manager (SQLite/PostgreSQL/MySQL)
-├── storage/             # Storage providers (Local, S3, Azure, GCS)
-├── extractors/          # EXIF extraction from images
-├── analyzers/           # Statistical analysis and aggregation
-├── reporters/           # Report generation (text, JSON, CSV)
-├── migrations/          # Data migration tools
-├── cli.py              # Command-line interface
-├── config.yaml         # Configuration file
-└── requirements.txt    # Python dependencies
+photographer-wrapped/
+├── analyzers/           # Statistical analysis engine
+│   ├── statistics_analyzer.py
+│   └── analyze_temporal_trends.py  # "Wrapped" generator
+├── database/           # SQLite database manager
+├── extractors/         # EXIF metadata extraction
+├── models/            # Data models (Photo, Session, Lens, Analysis)
+├── reporters/         # Report generation (text, JSON)
+├── storage/           # Storage providers (local, S3, etc.)
+├── cli.py            # Command-line interface
+├── config.yaml       # Configuration
+└── metadata.db       # SQLite database
 ```
 
-## 📋 Requirements
+## Requirements
 
 - Python 3.8+
-- [exiftool](https://exiftool.org/) installed and accessible in PATH
-- PyYAML, pyexiftool
-- Optional: boto3 (S3), azure-storage-blob (Azure), google-cloud-storage (GCS)
+- ExifTool (must be installed separately)
+  - Windows: Download from https://exiftool.org/
+  - Mac: `brew install exiftool`
+  - Linux: `sudo apt install exiftool`
+- Dependencies: PyYAML, pyexiftool
 
-## 🚀 Quick Start
+Optional for cloud storage:
+- boto3 (AWS S3)
+- azure-storage-blob (Azure)
+- google-cloud-storage (GCS)
 
-### 1. Install Dependencies
+## Quick Start
+
+### Installation
+
 ```bash
+# Clone repository
+git clone https://github.com/johnschwenck/RunClubSocialHub.git
+cd RunClubSocialHub
+
+# Install dependencies
 pip install -r requirements.txt
 ```
 
-### 2. Configure
-Edit `config.yaml` to match your setup (local vs cloud storage)
+### Basic Usage
 
-### 3. Migrate Existing Data (if applicable)
 ```bash
-python cli.py migrate --json-dir metadata_json/
+# Extract metadata from a single folder
+python cli.py extract "C:\Photos\2025" --category personal --group year_2025
+
+# Analyze and generate report
+python cli.py analyze personal/year_2025 --report
+
+# Generate temporal trends ("Wrapped" report)
+python analyzers/analyze_temporal_trends.py
 ```
 
-### 4. Extract New Photos
-```bash
-python cli.py extract /path/to/photos --category running --group weekly --name "2025-04-03"
-python cli.py extract /path/to/photos --category running --group weekly --name "2025-04-03"
+## Walkthrough Example: The Sole Running Club
+
+Here's a complete walkthrough using photos from "The Sole" running club as an example:
+
+### Step 1: Organize Your Photos
+
+Assume you have a folder structure like this:
+```
+E:\Photos\The Sole\
+├── 01 - 2025-04-03\
+│   ├── Photos\
+│   │   └── Edited\      # Your edited JPGs
+│   └── RAW\             # Your RAW files
+├── 02 - 2025-04-10\
+│   ├── Photos\
+│   │   └── Edited\
+│   └── RAW\
+└── ... (more weeks)
 ```
 
-### 5. Analyze & Report
+### Step 2: Crawl and Extract All Sessions
+
+Use the `crawl` command to process all folders automatically:
+
 ```bash
-python cli.py analyze running/weekly --type group --report
+python cli.py crawl "E:\Photos\The Sole" --category running --group thesole --target-folder Edited
+```
+
+This command:
+- Recursively finds all folders named "Edited"
+- Extracts EXIF metadata from each
+- Automatically detects sibling RAW folders
+- Creates separate sessions for each week
+- Names sessions based on folder structure (e.g., "01_-_2025-04-03")
+
+### Step 3: Analyze the Group
+
+```bash
+# Analyze all sessions in the group
+python cli.py analyze running/thesole --type group --report
+```
+
+This generates a comprehensive report showing:
+- Total photos across all sessions
+- Overall hit rate
+- Lens usage patterns
+- Camera settings distributions
+- Top combinations of settings
+
+### Step 4: Generate Temporal Trends
+
+```bash
+python analyzers/analyze_temporal_trends.py
+```
+
+This shows your progression throughout the year:
+```
+THE SOLE 2025: TEMPORAL TRENDS ANALYSIS
+Total Sessions: 29
+Date Range: 2025-04-03 to 2025-12-04
+
+Monthly Average Hit Rate:
+  2025-04: 31.73% (1 sessions)
+  2025-05: 20.08% (5 sessions)
+  2025-11: 40.01% (4 sessions)
+
+85mm F1.4 GM II Usage Over Time:
+  2025-04: 33 photos (11.7%)
+  2025-11: 276 photos (87.6%)
+  You found your favorite lens!
+
+Wide Open (f/1.4 or f/1.8) Usage:
+  2025-04: 46.6%
+  2025-12: 90.6%
+  You committed to bokeh!
+```
+
+### Step 5: Query Specific Insights
+
+```bash
+# See all sessions
+python cli.py list sessions --category running
+
+# Query specific lens usage
+python cli.py query --lens "FE 85mm F1.4 GM II"
+
+# List all categories and groups
+python cli.py list categories
 ```
 
 ## 📖 Detailed Usage
@@ -108,54 +197,108 @@ python cli.py list sessions --category running_sole
 python cli.py query --lens "FE 85mm F1.4 GM II"
 ```
 
-## 🔧 Configuration
+## Configuration
 
-### Database Options
+The system uses `config.yaml` for configuration. Here's the default local setup:
+
 ```yaml
 database:
-  type: sqlite  # or postgresql, mysql
-  sqlite:
-    path: metadata.db
+  type: sqlite
+  path: metadata.db
+
+storage:
+  type: local
+  base_path: .
+
+extraction:
+  exiftool_path: null  # Auto-detects exiftool installation
+  default_category: personal
+  default_group: ungrouped
 ```
 
-### Storage Options
+### Local-First Approach
+
+Photographer Wrapped is designed to run locally on your machine:
+- **No cloud costs**: Everything runs on your computer
+- **Privacy first**: Your photos never leave your machine
+- **Fast processing**: Direct access to local files
+- **Offline capable**: No internet required
+
+### Advanced: Cloud Storage (Optional)
+
+For advanced users who want cloud-based storage, you can configure alternative backends:
+
+<details>
+<summary>Click to expand cloud configuration examples</summary>
+
+#### AWS S3
 ```yaml
 storage:
-  type: local  # or s3, azure, gcs
-  
-  s3:
-    bucket: ${S3_BUCKET}
-    region: us-east-1
+  type: s3
+  bucket: your-bucket-name
+  region: us-east-1
+  credentials:
+    access_key_id: YOUR_ACCESS_KEY
+    secret_access_key: YOUR_SECRET_KEY
 ```
 
-### Analysis Options
+#### PostgreSQL Database
 ```yaml
-analysis:
-  enable_caching: true
-  calculate_hit_rate: true
-  metrics:
-    - lens_frequency
-    - shutter_speed_distribution
-    - iso_distribution
+database:
+  type: postgres
+  host: localhost
+  port: 5432
+  name: photo_metadata
+  user: your_username
+  password: your_password
 ```
 
-## 📊 Database Schema
+</details>
+
+**Note**: Cloud features are optional and not required for core functionality.
+
+## Database Schema
+
+The SQLite database maintains the following structure:
 
 - **categories**: Top-level organization (concerts, running, weddings)
 - **groups**: Sub-categories within categories
 - **sessions**: Individual photography events
-- **photos**: Photo metadata records
-- **lenses**: Lens information and usage stats
-- **aggregated_stats**: Cached analysis results
+- **photos**: Photo metadata records with EXIF data
+- **lenses**: Lens information and usage statistics
 
-## 🔄 Migration from Legacy System
+## Python API
 
-The new system maintains backward compatibility:
+You can also use Photographer Wrapped directly in Python:
 
-1. Existing JSON files in `metadata_json/` can be migrated
-2. Text reports are generated in the same format
-3. Folder structure is preserved
-4. All historical data is imported
+```python
+from extractors import ExifExtractor
+from analyzers import StatisticsAnalyzer
+from reporters import TextReporter
+
+# Extract metadata
+extractor = ExifExtractor.from_config()
+session = extractor.extract_folder(
+    folder_path='C:\Photos\Wedding_2025',
+    session_name='Smith_Wedding',
+    category='weddings',
+    group='2025'
+)
+
+# Analyze results
+analyzer = StatisticsAnalyzer.from_config()
+analysis = analyzer.analyze_session(session.id)
+
+# Generate report
+reporter = TextReporter.from_config()
+reporter.generate_report(analysis)
+```
+
+## Advanced Features
+
+### Migration from Legacy System
+
+If you have existing JSON metadata files, you can import them:
 
 ```bash
 # Migrate all existing JSON files
@@ -165,9 +308,14 @@ python cli.py migrate --json-dir metadata_json/
 python cli.py list sessions
 ```
 
-## 🌐 Cloud Deployment
+### Cloud Deployment (Optional)
 
-### AWS S3 + PostgreSQL
+For advanced users who need cloud deployment, the system supports:
+
+<details>
+<summary>Click to expand deployment options</summary>
+
+#### AWS S3 + PostgreSQL
 ```yaml
 database:
   type: postgresql
@@ -181,7 +329,7 @@ storage:
     region: us-east-1
 ```
 
-### Azure
+#### Azure Blob Storage + MySQL
 ```yaml
 database:
   type: mysql
@@ -195,64 +343,76 @@ storage:
     container: photos
 ```
 
-## 🔌 Python API
+</details>
 
-```python
-from extractors import ExifExtractor
-from analyzers import StatisticsAnalyzer
-from reporters import TextReporter
+**Note**: Cloud deployment is entirely optional. The local-only version provides full functionality.
 
-# Extract
-extractor = ExifExtractor.from_config()
-session = extractor.extract_folder(
-    folder_path='/photos/event',
-    session_name='event_2025',
-    category='concerts',
-    group='rock'
-)
+## Example Output
 
-# Analyze
-analyzer = StatisticsAnalyzer.from_config()
-analysis = analyzer.analyze_session(session.id)
-
-# Report
-reporter = TextReporter.from_config()
-reporter.generate_report(analysis)
-```
-
-## 📈 Example Output
+Here's what a temporal trends analysis looks like:
 
 ```
-Analysis: running_sole - weekly
+THE SOLE 2025: TEMPORAL TRENDS ANALYSIS
 ================================================================================
+Total Sessions: 29
+Date Range: 2025-04-03 to 2025-12-04
 
-Total photos analyzed: 2565
-Hit Rate: 29.8%
+SECTION 1: MONTHLY AVERAGE HIT RATE
+2025-04: 31.73% (1 sessions)
+2025-05: 20.08% (5 sessions)
+2025-06: 26.02% (4 sessions)
+2025-07: 27.78% (3 sessions)
+2025-08: 33.15% (3 sessions)
+2025-09: 28.44% (2 sessions)
+2025-10: 32.39% (7 sessions)
+2025-11: 40.01% (4 sessions)
 
-OVERALL METRICS
---------------------------------------------------------------------------------
-Lens Type Distribution:
-  Prime Lenses: 1701 photos (66.3%)
-    - FE 85mm F1.4 GM II: 1185 photos
-    - FE 135mm F1.8 GM: 516 photos
-  Zoom Lenses: 864 photos (33.7%)
-    - 24-70mm F2.8 DG DN | Art 019: 864 photos
+SECTION 2: LENS USAGE EVOLUTION
+85mm F1.4 GM II:
+  2025-04: 33 photos (11.7%)
+  2025-12: 125 photos (87.6%)
+  You found your favorite lens!
 
-Overall Shutter Speed Distribution:
-  1/200: 1089 times (42.5%)
-  1/250: 567 times (22.1%)
-  ...
+SECTION 3: HIT RATE PROGRESSION
+April: 31.73%
+November: 40.01%
+Improvement: +8.28 percentage points
+
+SECTION 4: APERTURE EVOLUTION
+Wide Open (f/1.4 or f/1.8):
+  2025-04: 46.6%
+  2025-12: 90.6%
+  You committed to bokeh!
+
+SECTION 5: FLASH USAGE
+Overall: 62.5% of photos use flash
+Most consistent months: October-December (72.0%)
+
+SECTION 6: MOST CONSISTENT SETTINGS
+ISO 800 + 1/320s: Used in 18 sessions
+Your "go-to" combo for running events
 ```
 
-## 🤝 Contributing
+## Contributing
 
-This is a personal project, but suggestions and improvements are welcome!
+Photographer Wrapped is open source and welcomes contributions! Areas for improvement:
 
-## 📄 License
+- Web UI with local processing (File System Access API)
+- Image classification (ML-based, not keyword-based)
+- Additional analysis features
+- Performance optimizations
 
-MIT License - See LICENSE file for details
+## License
 
-## 🙏 Acknowledgments
+MIT License - see LICENSE file for details
 
-- ExifTool by Phil Harvey
-- All the photographers using this tool to analyze their work
+## Support
+
+For questions or issues:
+- Open an issue on GitHub
+- Check existing documentation
+- Review the walkthrough example above
+
+---
+
+Built for photographers who want to understand their craft through data.
