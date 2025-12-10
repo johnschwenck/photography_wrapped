@@ -41,6 +41,7 @@ CREATE TABLE IF NOT EXISTS sessions (
     category_id INTEGER,
     group_id INTEGER,
     date TIMESTAMP,
+    date_detected TEXT,
     location TEXT,
     description TEXT,
     folder_path TEXT,

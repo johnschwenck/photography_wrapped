@@ -7,8 +7,10 @@ Analyze your photography metadata and see your year in review - like Spotify Wra
 Extract EXIF data from your photos, analyze your shooting patterns, and get insights about your photography progression over time.
 
 **Key Features:**
-- Extract metadata from RAW and JPG files
+- **Modern Web UI** with real-time extraction and database management
+- Extract metadata from RAW and JPG files (supports all ExifTool formats)
 - Calculate hit rate (edited photos / total RAW photos)
+- **Smart date extraction** from folder paths and filenames
 - Analyze lens usage, camera settings, shooting patterns
 - Temporal trend analysis (see your progression throughout the year)
 - Generate "Wrapped" style year-in-review reports
@@ -18,18 +20,25 @@ Extract EXIF data from your photos, analyze your shooting patterns, and get insi
 ## Project Structure
 
 ```
-photographer-wrapped/
+photography_wrapped/
 ├── analyzers/           # Statistical analysis engine
 │   ├── statistics_analyzer.py
 │   └── analyze_temporal_trends.py  # "Wrapped" generator
-├── database/           # SQLite database manager
-├── extractors/         # EXIF metadata extraction
+├── database/           # SQLite database manager & schema
+├── extractors/         # EXIF metadata extraction with date heuristics
+├── migrations/         # Database migration scripts
 ├── models/            # Data models (Photo, Session, Lens, Analysis)
 ├── reporters/         # Report generation (text, JSON)
+├── static/            # Web UI (HTML, CSS, JavaScript)
+│   ├── index.html
+│   ├── app.js
+│   └── styles.css
 ├── storage/           # Storage providers (local, S3, etc.)
 ├── cli.py            # Command-line interface
+├── run_local.py      # Flask web server for local UI
 ├── config.yaml       # Configuration
-└── metadata.db       # SQLite database
+├── requirements.txt  # Python dependencies
+└── metadata.db       # SQLite database (generated)
 ```
 
 ## Requirements
@@ -52,14 +61,35 @@ Optional for cloud storage:
 
 ```bash
 # Clone repository
-git clone https://github.com/johnschwenck/RunClubSocialHub.git
-cd RunClubSocialHub
+git clone https://github.com/johnschwenck/photography_wrapped.git
+cd photography_wrapped
 
 # Install dependencies
 pip install -r requirements.txt
 ```
 
-### Basic Usage
+### Web Interface (Recommended)
+
+The easiest way to use Photographer Wrapped is through the web interface:
+
+```bash
+# Start the local web server
+python run_local.py
+```
+
+Then open your browser to `http://localhost:5000`
+
+**Features:**
+- Single folder or crawl mode extraction
+- Automatic date detection from folder paths and filenames
+- Real-time extraction progress
+- Database management with edit/delete capabilities
+- Analysis and "Wrapped" report generation
+- Clean, modern UI
+
+### CLI Usage (Alternative)
+
+For automation or scripting, use the command-line interface:
 
 ```bash
 # Extract metadata from a single folder
@@ -72,7 +102,32 @@ python cli.py analyze personal/year_2025 --report
 python analyzers/analyze_temporal_trends.py
 ```
 
-## 📁 Understanding Folder Structure & RAW Detection
+## Date Extraction
+
+Photographer Wrapped intelligently extracts dates from your photo organization:
+
+### Automatic Date Detection
+
+The system uses a **hierarchical approach** to find session dates:
+
+1. **Manual Input**: Use the date field if you want to specify a date
+2. **Folder Path Heuristics**: Automatically detects dates in folder names (e.g., `2025-04-03`, `04-03-2025`, `20250403`)
+3. **Filename Fallback**: Scans photo filenames if no date found in path
+   - If 1 unique date: Uses that date
+   - If multiple dates: Uses the most common (mode)
+   - Example: `IMG_20250403_123456.jpg` → `2025-04-03`
+
+### Supported Date Formats
+
+- `YYYY-MM-DD`: 2025-04-03
+- `MM-DD-YYYY`: 04-03-2025
+- `MM-DD-YY`: 04-03-25
+- `YY-MM-DD`: 25-04-03
+- `YYYYMMDD`: 20250403 (compact)
+
+**Note**: The system will show you how the date was determined (path, filename with details, or not found).
+
+## Folder Structure & RAW Detection
 
 **IMPORTANT**: This system is designed to work with **final edited photos only**. Point the extraction to your edited/exported photos folder, NOT the parent directory containing RAW files.
 
@@ -81,7 +136,7 @@ python analyzers/analyze_temporal_trends.py
 The system works best with this structure:
 ```
 E:\Photos\Session Name\
-├── Edited\          # ✅ Point extraction HERE (your final JPGs/TIFFs)
+├── Edited\          # Point extraction HERE (your final JPGs/TIFFs)
 └── RAW\             # System automatically detects this one level up
 ```
 
@@ -92,7 +147,7 @@ E:\Photos\Session Name\
 3. **If RAW folder found**: Calculates hit rate (edited photos / RAW photos)
 4. **If no RAW folder**: Sets hit rate to `-` (null) and focuses on edited photos only
 
-### ⚠️ Common Mistakes to Avoid
+### Common Mistakes to Avoid
 
 **❌ WRONG - Don't point to parent directory:**
 ```
@@ -462,10 +517,11 @@ Your "go-to" combo for running events
 
 Photographer Wrapped is open source and welcomes contributions! Areas for improvement:
 
-- Web UI with local processing (File System Access API)
 - Image classification (ML-based, not keyword-based)
-- Additional analysis features
-- Performance optimizations
+- Additional analysis features (gear recommendations, time-of-day patterns, etc.)
+- Performance optimizations for large libraries
+- Mobile-responsive UI enhancements
+- Cloud deployment guides (Vercel, AWS, etc.)
 
 ## License
 

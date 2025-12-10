@@ -149,8 +149,9 @@ def extract_metadata():
         data = request.json
         folder_path = data.get('folder_path')
         session_name = data.get('session_name') or os.path.basename(folder_path)
-        date_str = data.get('date')
+        date_str = data.get('date_str') or data.get('date')  # Support both parameter names
         use_date_heuristics = data.get('use_date_heuristics', True)
+        use_filename_dates = data.get('use_filename_dates', True)
         category = data.get('category', 'personal')
         group = data.get('group', 'ungrouped')
         description = data.get('description')
@@ -184,19 +185,24 @@ def extract_metadata():
             description=description,
             calculate_hit_rate=calculate_hit_rate,
             date=session_date,
-            use_date_heuristics=use_date_heuristics
+            use_date_heuristics=use_date_heuristics,
+            use_filename_dates=use_filename_dates
         )
         
         if not session:
             return jsonify({'error': 'Extraction failed'}), 500
         
-        # Determine date detection status
-        date_detected = 'not found'
-        if session.date:
-            if session_date:
-                date_detected = 'provided'
-            elif use_date_heuristics:
-                date_detected = 'found'
+        # Use date_detected from session, or fall back to legacy logic
+        if session.date_detected:
+            date_detected = session.date_detected
+        else:
+            # Legacy fallback for existing data
+            date_detected = 'not found'
+            if session.date:
+                if session_date:
+                    date_detected = 'provided'
+                elif use_date_heuristics:
+                    date_detected = 'found'
         
         return jsonify({
             'success': True,
@@ -240,6 +246,9 @@ def crawl_folders():
         data = request.json
         parent_dir = data.get('parent_dir')
         target_folder = data.get('target_folder', 'Edited')
+        date_str = data.get('date_str') or data.get('date')  # Support both parameter names
+        use_date_heuristics = data.get('use_date_heuristics', True)
+        use_filename_dates = data.get('use_filename_dates', True)
         category = data.get('category', 'personal')
         group = data.get('group', 'ungrouped')
         description = data.get('description')
@@ -274,6 +283,14 @@ def crawl_folders():
         logger.info(f"Found {len(target_folders)} folders to process")
         logger.info(f"Batch crawling - Category: {category}, Group: {group}, Target: {target_folder}")
         
+        # Parse date if provided
+        session_date = None
+        if date_str:
+            try:
+                session_date = datetime.fromisoformat(date_str)
+            except ValueError:
+                logger.warning(f"Invalid date format: {date_str}")
+        
         # Process each folder
         results = []
         successful = 0
@@ -299,6 +316,9 @@ def crawl_folders():
                 session = extractor.extract_folder(
                     folder_path=folder_path,
                     session_name=session_name,
+                    date=session_date,
+                    use_date_heuristics=use_date_heuristics,
+                    use_filename_dates=use_filename_dates,
                     category=category,
                     group=group,
                     description=description,

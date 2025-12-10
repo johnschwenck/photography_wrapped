@@ -81,6 +81,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Date heuristics checkbox - toggle date input
     const dateHeuristicsCheckbox = document.getElementById('use-date-heuristics');
+    const filenameDatesCheckbox = document.getElementById('use-filename-dates');
     const sessionDateInput = document.getElementById('session-date');
     
     dateHeuristicsCheckbox.addEventListener('change', () => {
@@ -313,6 +314,7 @@ function addToQueue() {
     const sessionName = document.getElementById('session-name').value.trim();
     const sessionDate = document.getElementById('session-date').value.trim();
     const useDateHeuristics = document.getElementById('use-date-heuristics').checked;
+    const useFilenameDates = document.getElementById('use-filename-dates').checked;
     const category = document.getElementById('category').value.trim();
     const group = document.getElementById('group').value.trim();
     const calculateHitRate = document.getElementById('calculate-hit-rate').checked;
@@ -348,6 +350,7 @@ function addToQueue() {
         sessionName: sessionName,
         sessionDate: sessionDate,
         useDateHeuristics: useDateHeuristics,
+        useFilenameDates: useFilenameDates,
         category: category,
         group: group,
         calculateHitRate: calculateHitRate,
@@ -364,6 +367,7 @@ function addToQueue() {
     document.getElementById('session-name').value = '';
     document.getElementById('session-date').value = '';
     document.getElementById('use-date-heuristics').checked = true;
+    document.getElementById('use-filename-dates').checked = true;
     document.getElementById('category').value = '';
     document.getElementById('group').value = '';
     document.getElementById('calculate-hit-rate').checked = true;
@@ -447,6 +451,7 @@ async function extractAllFromQueue() {
                         session_name: item.sessionName,
                         date: item.sessionDate,
                         use_date_heuristics: item.useDateHeuristics,
+                        use_filename_dates: item.useFilenameDates,
                         category: item.category,
                         group: item.group,
                         calculate_hit_rate: item.calculateHitRate
@@ -1010,6 +1015,8 @@ async function extractMetadata() {
     const mode = document.getElementById('mode-select').value;
     const folderPath = document.getElementById('folder-path').value.trim();
     const sessionName = document.getElementById('session-name').value.trim();
+    const sessionDate = document.getElementById('session-date').value.trim();
+    const useDateHeuristics = document.getElementById('use-date-heuristics').checked;
     const category = document.getElementById('category').value.trim();
     const group = document.getElementById('group').value.trim();
     const calculateHitRate = document.getElementById('calculate-hit-rate').checked;
@@ -1043,6 +1050,9 @@ async function extractMetadata() {
                 body: JSON.stringify({
                     folder_path: folderPath,
                     session_name: sessionName,
+                    date_str: sessionDate,
+                    use_date_heuristics: useDateHeuristics,
+                    use_filename_dates: useFilenameDates,
                     category: category,
                     group: group,
                     calculate_hit_rate: calculateHitRate
@@ -1060,6 +1070,9 @@ async function extractMetadata() {
                 body: JSON.stringify({
                     parent_dir: folderPath,
                     target_folder: targetFolder,
+                    date_str: sessionDate,
+                    use_date_heuristics: useDateHeuristics,
+                    use_filename_dates: useFilenameDates,
                     category: category,
                     group: group,
                     calculate_hit_rate: calculateHitRate
@@ -1115,6 +1128,8 @@ function displaySingleExtractResult(data) {
             </div>
             <p style="margin-top: 15px;"><strong>Category:</strong> ${session.category}</p>
             <p><strong>Group:</strong> ${session.group}</p>
+            ${session.date ? `<p><strong>Date:</strong> ${session.date} <span style="color: var(--success);">(${session.date_detected || 'provided'})</span></p>` : `<p><strong>Date:</strong> <span style="color: var(--error);">Not found</span></p>`}
+            ${session.date_detected && session.date_detected.startsWith('filename') ? `<p style="color: var(--warning); font-size: 0.9em; margin-top: 10px;">💡 Date extracted from filenames. You can adjust this in the Database tab if needed.</p>` : ''}
         </div>
     `;
 }

@@ -57,6 +57,7 @@ class Session:
     
     id: Optional[int] = None
     date: Optional[datetime] = None
+    date_detected: Optional[str] = None  # How date was determined (e.g., "path", "filename (2 different dates, using most common (3/5 files))")
     location: Optional[str] = None
     description: Optional[str] = None
     folder_path: Optional[str] = None

@@ -118,12 +118,15 @@ class ExifExtractor:
         if not session_name:
             return None
         
-        # Pattern 1: YYYY-MM-DD or YYYY.MM.DD (ISO format)
+        # Date patterns with separators required between components
+        # Use negative lookahead/lookbehind to prevent matching partial numbers and handle filenames like IMG_20250403_123456
+        # Word boundaries (\b) don't work well with underscores since _ is considered a word character
         patterns = [
-            (r'(\d{4})[-.]?(\d{1,2})[-.]?(\d{1,2})', 'YMD'),  # 2025-04-03 or 20250403
-            (r'(\d{1,2})[-.]?(\d{1,2})[-.]?(\d{4})', 'MDY'),  # 04-03-2025 or 04.03.2025
-            (r'(\d{1,2})[-.]?(\d{1,2})[-.]?(\d{2})(?!\d)', 'MDy'),  # 04-03-25 or 04.03.25
-            (r'(\d{2})[-.]?(\d{1,2})[-.]?(\d{1,2})(?!\d)', 'yMD'),  # 25-04-03 or 25.04.03
+            (r'(?<!\d)(\d{4})[-./](\d{1,2})[-./](\d{1,2})(?!\d)', 'YMD'),  # 2025-04-03 or 2025.04.03
+            (r'(?<!\d)(\d{1,2})[-./](\d{1,2})[-./](\d{4})(?!\d)', 'MDY'),  # 04-03-2025 or 04.03.2025
+            (r'(?<!\d)(\d{1,2})[-./](\d{1,2})[-./](\d{2})(?!\d)', 'MDy'),  # 04-03-25 or 04.03.25
+            (r'(?<!\d)(\d{2})[-./](\d{1,2})[-./](\d{1,2})(?!\d)', 'yMD'),  # 25-04-03 or 25.04.03
+            (r'(?<!\d)(\d{8})(?!\d)', 'YYYYMMDD'),  # 20250403 (compact format, works with IMG_20250403_123456)
         ]
         
         # Collect all valid dates found
@@ -133,7 +136,13 @@ class ExifExtractor:
             # Find all matches (not just first)
             for match in re.finditer(pattern, session_name):
                 try:
-                    if format_type == 'YMD':
+                    if format_type == 'YYYYMMDD':
+                        # Compact format: 20250403
+                        date_str = match.group(1)
+                        year = int(date_str[0:4])
+                        month = int(date_str[4:6])
+                        day = int(date_str[6:8])
+                    elif format_type == 'YMD':
                         year, month, day = match.groups()
                         year, month, day = int(year), int(month), int(day)
                     elif format_type == 'MDY':
@@ -169,6 +178,47 @@ class ExifExtractor:
         
         logger.debug(f"No valid date found in session name: {session_name}")
         return None
+    
+    def extract_date_from_filenames(self, image_files: List[str]) -> tuple[Optional[datetime], str]:
+        """
+        Extract date from filenames as a fallback method.
+        
+        Logic:
+        1) Find any files that have date patterns in their names
+        2) If no files have patterns, return (None, "no dates found")
+        3) If precisely 1 unique date found, return (date, "1 unique date")
+        4) If more than one date found, return (most_common, "X dates, most common used")
+        
+        Args:
+            image_files: List of image file paths
+        
+        Returns:
+            Tuple of (extracted_date, description_string)
+        """
+        from collections import Counter
+        
+        # Extract dates from all filenames
+        found_dates = []
+        for file_path in image_files:
+            filename = os.path.basename(file_path)
+            extracted_date = self.extract_date_from_session_name(filename)
+            if extracted_date:
+                found_dates.append(extracted_date)
+        
+        if not found_dates:
+            return None, "no dates found in filenames"
+        
+        # Count unique dates
+        unique_dates = list(set(found_dates))
+        
+        if len(unique_dates) == 1:
+            return unique_dates[0], "1 unique date found"
+        
+        # Multiple dates found - use mode (most common)
+        date_counts = Counter(found_dates)
+        most_common_date, count = date_counts.most_common(1)[0]
+        
+        return most_common_date, f"{len(unique_dates)} different dates, using most common ({count}/{len(found_dates)} files)"
     
     def extract_metadata_from_file(self, file_path: str) -> Optional[Dict[str, Any]]:
         """
@@ -326,7 +376,8 @@ class ExifExtractor:
                       description: Optional[str] = None,
                       calculate_hit_rate: bool = True,
                       date: Optional[datetime] = None,
-                      use_date_heuristics: bool = True) -> Optional[Session]:
+                      use_date_heuristics: bool = True,
+                      use_filename_dates: bool = True) -> Optional[Session]:
         """
         Extract metadata from all photos in a folder and create session.
         
@@ -371,6 +422,8 @@ class ExifExtractor:
         # Extract date using heuristics if enabled and no explicit date provided
         # Use folder path (which is more likely to contain dates) rather than custom session name
         session_date = date
+        date_source = None  # Track how date was determined
+        
         if not session_date and use_date_heuristics:
             # Try to extract date from the full folder path
             # First try the immediate folder name, then work backwards through parent folders
@@ -381,8 +434,20 @@ class ExifExtractor:
             
             if session_date:
                 logger.info(f"Date successfully extracted from path: {session_date.strftime('%Y-%m-%d')}")
+                date_source = "path"
             else:
                 logger.info(f"No date pattern found in path: '{folder_path}'")
+        
+        # Fallback to extracting date from filenames if still no date
+        if not session_date and use_filename_dates:
+            logger.info(f"Attempting to extract date from filenames in: '{folder_path}'")
+            session_date, filename_details = self.extract_date_from_filenames(image_files)
+            
+            if session_date:
+                logger.info(f"Date extracted from filenames: {session_date.strftime('%Y-%m-%d')} - {filename_details}")
+                date_source = f"filename ({filename_details})"
+            else:
+                logger.info(f"No date pattern found in filenames")
         
         logger.info(f"Creating Session object with date: {session_date} (type: {type(session_date)})")
         
@@ -394,7 +459,8 @@ class ExifExtractor:
             description=description,
             folder_path=folder_path,
             total_photos=len(image_files),
-            date=session_date
+            date=session_date,
+            date_detected=date_source  # How date was determined
         )
         
         # Try to detect and count RAW folder (optional feature)

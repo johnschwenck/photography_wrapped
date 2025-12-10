@@ -339,14 +339,14 @@ class DatabaseManager:
             cursor.execute("""
                 INSERT INTO sessions (
                     name, category, group_name, category_id, group_id,
-                    date, location, description, folder_path, raw_folder_path,
+                    date, date_detected, location, description, folder_path, raw_folder_path,
                     total_photos, total_raw_photos, hit_rate
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 session.name, session.category, session.group,
                 category.id, group.id,
-                session.date, session.location, session.description,
+                session.date, session.date_detected, session.location, session.description,
                 session.folder_path, session.raw_folder_path,
                 session.total_photos, session.total_raw_photos, session.hit_rate
             ))
@@ -371,6 +371,7 @@ class DatabaseManager:
                     category=row['category'],  # type: ignore
                     group=row['group_name'],  # type: ignore
                     date=datetime.fromisoformat(row['date']) if row['date'] else None,  # type: ignore
+                    date_detected=row['date_detected'] if 'date_detected' in row.keys() else None,  # type: ignore
                     location=row['location'],  # type: ignore
                     description=row['description'],  # type: ignore
                     folder_path=row['folder_path'],  # type: ignore
@@ -431,6 +432,7 @@ class DatabaseManager:
                     category=row['category'],  # type: ignore
                     group=row['group_name'],  # type: ignore
                     date=datetime.fromisoformat(row['date']) if row['date'] else None,  # type: ignore
+                    date_detected=row['date_detected'] if 'date_detected' in row.keys() else None,  # type: ignore
                     total_photos=row['total_photos'],  # type: ignore
                     hit_rate=row['hit_rate'],  # type: ignore
                 ))
