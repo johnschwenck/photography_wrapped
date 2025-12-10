@@ -1,6 +1,14 @@
 // API base URL
 const API_BASE = 'http://localhost:5000/api';
 
+// Utility function to escape HTML
+function escapeHtml(text) {
+    if (text === null || text === undefined) return '';
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
 // Progress polling
 let progressInterval = null;
 
@@ -100,6 +108,17 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('filter-db-category').addEventListener('input', filterDatabaseTable);
     document.getElementById('filter-db-group').addEventListener('input', filterDatabaseTable);
     
+    // Database reset controls
+    document.getElementById('reset-all-btn').addEventListener('click', handleResetAll);
+    document.getElementById('reset-category-btn').addEventListener('click', () => toggleResetDropdown('category'));
+    document.getElementById('reset-group-btn').addEventListener('click', () => toggleResetDropdown('group'));
+    document.getElementById('confirm-delete-category').addEventListener('click', () => handleDeleteByFilter('category'));
+    document.getElementById('cancel-delete-category').addEventListener('click', () => closeResetDropdown('category'));
+    document.getElementById('confirm-delete-group').addEventListener('click', () => handleDeleteByFilter('group'));
+    document.getElementById('cancel-delete-group').addEventListener('click', () => closeResetDropdown('group'));
+    document.getElementById('select-all-categories').addEventListener('change', (e) => handleSelectAll('category', e.target.checked));
+    document.getElementById('select-all-groups').addEventListener('change', (e) => handleSelectAll('group', e.target.checked));
+    
     // Add sort handlers for table headers
     document.querySelectorAll('#db-sessions-table th[data-sort]').forEach(th => {
         th.addEventListener('click', () => sortDatabaseTable(th.dataset.sort));
@@ -108,6 +127,14 @@ document.addEventListener('DOMContentLoaded', () => {
     // Load database overview when tab is clicked
     document.querySelector('[data-tab="database"]').addEventListener('click', () => {
         setTimeout(() => loadDatabaseOverview(), 100);
+    });
+    
+    // Close dropdowns when clicking outside
+    document.addEventListener('click', (e) => {
+        if (!e.target.closest('.db-reset-controls')) {
+            closeResetDropdown('category');
+            closeResetDropdown('group');
+        }
     });
 });
 
@@ -1334,6 +1361,165 @@ function sortDatabaseTable(column, skipToggle = false) {
     });
     
     renderDatabaseTable();
+}
+
+function renderDatabaseTable() {
+    const tbody = document.getElementById('db-sessions-tbody');
+    
+    if (dbData.filteredSessions.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="7" style="padding: 20px; text-align: center;">No sessions found</td></tr>';
+        return;
+    }
+    
+    tbody.innerHTML = dbData.filteredSessions.map(session => `
+        <tr>
+            <td style="padding: 12px;">${escapeHtml(session.name)}</td>
+            <td style="padding: 12px;">${escapeHtml(session.category)}</td>
+            <td style="padding: 12px;">${escapeHtml(session.group)}</td>
+            <td style="padding: 12px; text-align: right;">${session.total_photos}</td>
+            <td style="padding: 12px; text-align: right;">${session.total_raw_photos}</td>
+            <td style="padding: 12px; text-align: right;">${session.hit_rate !== null ? session.hit_rate + '%' : 'N/A'}</td>
+            <td style="padding: 12px;">${session.date || 'N/A'}</td>
+        </tr>
+    `).join('');
+}
+
+// Database Reset Functions
+async function handleResetAll() {
+    if (!confirm('⚠️ WARNING: This will permanently delete ALL data from the database!\n\nThis includes:\n- All sessions\n- All photos\n- All analyses\n- All lenses\n\nThis action CANNOT be undone.\n\nAre you absolutely sure?')) {
+        return;
+    }
+    
+    // Double confirmation for safety
+    if (!confirm('Final confirmation: Delete everything?')) {
+        return;
+    }
+    
+    const resetBtn = document.getElementById('reset-all-btn');
+    resetBtn.disabled = true;
+    resetBtn.textContent = 'Deleting...';
+    
+    try {
+        const response = await fetch(`${API_BASE}/database/reset`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ confirm: true })
+        });
+        
+        const data = await response.json();
+        
+        if (response.ok && data.success) {
+            alert(`✅ Database reset complete!\n\nDeleted:\n- ${data.deleted.sessions} sessions\n- ${data.deleted.photos} photos\n- ${data.deleted.lenses} lenses\n- ${data.deleted.analyses} analyses`);
+            loadDatabaseOverview();
+        } else {
+            alert(`❌ Error: ${data.error || 'Failed to reset database'}`);
+        }
+    } catch (error) {
+        alert(`❌ Error: ${error.message}`);
+    } finally {
+        resetBtn.disabled = false;
+        resetBtn.textContent = 'Reset All Data';
+    }
+}
+
+async function toggleResetDropdown(type) {
+    const dropdown = document.getElementById(`${type}-dropdown`);
+    const otherDropdown = document.getElementById(type === 'category' ? 'group-dropdown' : 'category-dropdown');
+    
+    // Close other dropdown
+    otherDropdown.style.display = 'none';
+    
+    // Toggle current dropdown
+    if (dropdown.style.display === 'none' || !dropdown.style.display) {
+        dropdown.style.display = 'block';
+        await loadDropdownOptions(type);
+    } else {
+        dropdown.style.display = 'none';
+    }
+}
+
+function closeResetDropdown(type) {
+    const dropdown = document.getElementById(`${type}-dropdown`);
+    dropdown.style.display = 'none';
+}
+
+async function loadDropdownOptions(type) {
+    const listContainer = document.getElementById(`${type}-list`);
+    listContainer.innerHTML = '<p style="padding: 10px;">Loading...</p>';
+    
+    try {
+        const response = await fetch(`${API_BASE}/database/categories-groups`);
+        const data = await response.json();
+        
+        if (!response.ok || !data.success) {
+            listContainer.innerHTML = '<p style="padding: 10px; color: var(--error);">Error loading data</p>';
+            return;
+        }
+        
+        const items = type === 'category' ? data.categories : data.groups;
+        
+        if (items.length === 0) {
+            listContainer.innerHTML = `<p style="padding: 10px; color: var(--text-secondary);">No ${type === 'category' ? 'categories' : 'groups'} found</p>`;
+            return;
+        }
+        
+        listContainer.innerHTML = items.map(item => `
+            <label>
+                <input type="checkbox" class="${type}-checkbox" value="${escapeHtml(item)}">
+                ${escapeHtml(item)}
+            </label>
+        `).join('');
+        
+    } catch (error) {
+        listContainer.innerHTML = `<p style="padding: 10px; color: var(--error);">Error: ${error.message}</p>`;
+    }
+}
+
+function handleSelectAll(type, checked) {
+    const checkboxes = document.querySelectorAll(`.${type}-checkbox`);
+    checkboxes.forEach(cb => cb.checked = checked);
+}
+
+async function handleDeleteByFilter(type) {
+    const checkboxes = document.querySelectorAll(`.${type}-checkbox:checked`);
+    const selected = Array.from(checkboxes).map(cb => cb.value);
+    
+    if (selected.length === 0) {
+        alert(`Please select at least one ${type} to delete.`);
+        return;
+    }
+    
+    const typeName = type === 'category' ? 'categories' : 'groups';
+    if (!confirm(`⚠️ Are you sure you want to delete all sessions from these ${typeName}?\n\n${selected.join(', ')}\n\nThis will permanently delete all associated photos and cannot be undone.`)) {
+        return;
+    }
+    
+    const confirmBtn = document.getElementById(`confirm-delete-${type}`);
+    confirmBtn.disabled = true;
+    confirmBtn.textContent = 'Deleting...';
+    
+    try {
+        const response = await fetch(`${API_BASE}/database/delete-${type}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ [typeName]: selected })
+        });
+        
+        const data = await response.json();
+        
+        if (response.ok && data.success) {
+            alert(`✅ ${data.message}`);
+            closeResetDropdown(type);
+            loadDatabaseOverview();
+        } else {
+            alert(`❌ Error: ${data.error || 'Failed to delete'}`);
+        }
+    } catch (error) {
+        alert(`❌ Error: ${error.message}`);
+    } finally {
+        confirmBtn.disabled = false;
+        confirmBtn.textContent = 'Delete Selected';
+    }
 }
 
 function renderDatabaseTable() {

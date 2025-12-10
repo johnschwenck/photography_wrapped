@@ -575,6 +575,123 @@ def database_overview():
         return jsonify({'error': str(e)}), 500
 
 
+@app.route('/api/database/categories-groups', methods=['GET'])
+def get_categories_and_groups():
+    """
+    Get all categories and groups for dropdown population.
+    
+    Returns:
+        JSON with categories and groups lists
+    """
+    try:
+        db = DatabaseManager.from_config(CONFIG_PATH)
+        categories = db.get_all_categories()
+        groups = db.get_all_groups()
+        
+        return jsonify({
+            'success': True,
+            'categories': categories,
+            'groups': groups
+        })
+        
+    except Exception as e:
+        logger.error(f"Error getting categories/groups: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/database/reset', methods=['POST'])
+def reset_database():
+    """
+    Reset entire database (delete all data).
+    
+    Returns:
+        JSON with counts of deleted records
+    """
+    try:
+        data = request.get_json() or {}
+        confirm = data.get('confirm', False)
+        
+        if not confirm:
+            return jsonify({'error': 'Confirmation required'}), 400
+        
+        db = DatabaseManager.from_config(CONFIG_PATH)
+        deleted_counts = db.reset_database()
+        
+        return jsonify({
+            'success': True,
+            'message': 'Database reset successfully',
+            'deleted': deleted_counts
+        })
+        
+    except Exception as e:
+        logger.error(f"Error resetting database: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/database/delete-category', methods=['POST'])
+def delete_by_category():
+    """
+    Delete sessions by category.
+    
+    Request Body:
+        categories: List of category names to delete
+    
+    Returns:
+        JSON with number of sessions deleted
+    """
+    try:
+        data = request.get_json() or {}
+        categories = data.get('categories', [])
+        
+        if not categories:
+            return jsonify({'error': 'No categories specified'}), 400
+        
+        db = DatabaseManager.from_config(CONFIG_PATH)
+        deleted_count = db.delete_sessions_by_category(categories)
+        
+        return jsonify({
+            'success': True,
+            'message': f'Deleted {deleted_count} sessions from {len(categories)} categories',
+            'deleted_sessions': deleted_count
+        })
+        
+    except Exception as e:
+        logger.error(f"Error deleting by category: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/database/delete-group', methods=['POST'])
+def delete_by_group():
+    """
+    Delete sessions by group.
+    
+    Request Body:
+        groups: List of group names to delete
+    
+    Returns:
+        JSON with number of sessions deleted
+    """
+    try:
+        data = request.get_json() or {}
+        groups = data.get('groups', [])
+        
+        if not groups:
+            return jsonify({'error': 'No groups specified'}), 400
+        
+        db = DatabaseManager.from_config(CONFIG_PATH)
+        deleted_count = db.delete_sessions_by_group(groups)
+        
+        return jsonify({
+            'success': True,
+            'message': f'Deleted {deleted_count} sessions from {len(groups)} groups',
+            'deleted_sessions': deleted_count
+        })
+        
+    except Exception as e:
+        logger.error(f"Error deleting by group: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/api/categories', methods=['GET'])
 def list_categories():
     """
@@ -725,6 +842,10 @@ def main():
     logger.info("  POST /api/wrapped         - Generate wrapped report")
     logger.info("  GET  /api/sessions        - List sessions")
     logger.info("  GET  /api/database/overview - Database overview with stats")
+    logger.info("  GET  /api/database/categories-groups - Get categories and groups")
+    logger.info("  POST /api/database/reset - Reset entire database")
+    logger.info("  POST /api/database/delete-category - Delete by category")
+    logger.info("  POST /api/database/delete-group - Delete by group")
     logger.info("  GET  /api/categories      - List categories")
     logger.info("  GET  /api/groups          - List groups")
     logger.info("")

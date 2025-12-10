@@ -132,6 +132,51 @@
                     <button id="refresh-db-btn" class="btn-secondary">Refresh</button>
                 </div>
 
+                <div class="db-reset-controls" style="margin-bottom: 20px; padding: 15px; background-color: var(--secondary-bg); border-radius: 8px; border: 1px solid var(--border-color);">
+                    <h4 style="margin-top: 0; color: var(--danger-color);">⚠️ Database Management</h4>
+                    <div style="display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-start;">
+                        <button id="reset-all-btn" class="btn-danger" style="background-color: var(--danger-color);">Reset All Data</button>
+                        
+                        <div style="position: relative; display: inline-block;">
+                            <button id="reset-category-btn" class="btn-secondary">Delete by Category</button>
+                            <div id="category-dropdown" class="reset-dropdown" style="display: none;">
+                                <div style="padding: 10px; border-bottom: 1px solid var(--border-color);">
+                                    <label style="display: flex; align-items: center; cursor: pointer;">
+                                        <input type="checkbox" id="select-all-categories" style="margin-right: 8px;">
+                                        <strong>Select All</strong>
+                                    </label>
+                                </div>
+                                <div id="category-list" style="max-height: 200px; overflow-y: auto; padding: 10px;">
+                                    <!-- Categories populated dynamically -->
+                                </div>
+                                <div style="padding: 10px; border-top: 1px solid var(--border-color); display: flex; gap: 8px;">
+                                    <button id="confirm-delete-category" class="btn-danger" style="flex: 1;">Delete Selected</button>
+                                    <button id="cancel-delete-category" class="btn-secondary" style="flex: 1;">Cancel</button>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div style="position: relative; display: inline-block;">
+                            <button id="reset-group-btn" class="btn-secondary">Delete by Group</button>
+                            <div id="group-dropdown" class="reset-dropdown" style="display: none;">
+                                <div style="padding: 10px; border-bottom: 1px solid var(--border-color);">
+                                    <label style="display: flex; align-items: center; cursor: pointer;">
+                                        <input type="checkbox" id="select-all-groups" style="margin-right: 8px;">
+                                        <strong>Select All</strong>
+                                    </label>
+                                </div>
+                                <div id="group-list" style="max-height: 200px; overflow-y: auto; padding: 10px;">
+                                    <!-- Groups populated dynamically -->
+                                </div>
+                                <div style="padding: 10px; border-top: 1px solid var(--border-color); display: flex; gap: 8px;">
+                                    <button id="confirm-delete-group" class="btn-danger" style="flex: 1;">Delete Selected</button>
+                                    <button id="cancel-delete-group" class="btn-secondary" style="flex: 1;">Cancel</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
                 <div id="db-table-container" style="overflow-x: auto;">
                     <table id="db-sessions-table" style="width: 100%; border-collapse: collapse;">
                         <thead>

@@ -585,6 +585,122 @@ class DatabaseManager:
         
         return lenses
     
+    def get_all_categories(self) -> List[str]:
+        """Get all unique categories from sessions."""
+        with self.get_cursor() as cursor:
+            cursor.execute("SELECT DISTINCT category FROM sessions WHERE category IS NOT NULL ORDER BY category")
+            return [row[0] for row in cursor.fetchall()]
+    
+    def get_all_groups(self) -> List[str]:
+        """Get all unique groups from sessions."""
+        with self.get_cursor() as cursor:
+            cursor.execute("SELECT DISTINCT group_name FROM sessions WHERE group_name IS NOT NULL ORDER BY group_name")
+            return [row[0] for row in cursor.fetchall()]
+    
+    def delete_sessions_by_category(self, categories: List[str]) -> int:
+        """Delete sessions and their photos by category.
+        
+        Args:
+            categories: List of category names to delete
+            
+        Returns:
+            Number of sessions deleted
+        """
+        if not categories:
+            return 0
+        
+        placeholders = ','.join('?' * len(categories))
+        with self.get_cursor() as cursor:
+            # Get session IDs to delete
+            cursor.execute(f"SELECT id FROM sessions WHERE category IN ({placeholders})", categories)
+            session_ids = [row[0] for row in cursor.fetchall()]
+            
+            if not session_ids:
+                return 0
+            
+            # Delete photos first (foreign key constraint)
+            id_placeholders = ','.join('?' * len(session_ids))
+            cursor.execute(f"DELETE FROM photos WHERE session_id IN ({id_placeholders})", session_ids)
+            
+            # Delete sessions
+            cursor.execute(f"DELETE FROM sessions WHERE category IN ({placeholders})", categories)
+            self.conn.commit()
+            
+            logger.info(f"Deleted {len(session_ids)} sessions from categories: {categories}")
+            return len(session_ids)
+    
+    def delete_sessions_by_group(self, groups: List[str]) -> int:
+        """Delete sessions and their photos by group.
+        
+        Args:
+            groups: List of group names to delete
+            
+        Returns:
+            Number of sessions deleted
+        """
+        if not groups:
+            return 0
+        
+        placeholders = ','.join('?' * len(groups))
+        with self.get_cursor() as cursor:
+            # Get session IDs to delete
+            cursor.execute(f"SELECT id FROM sessions WHERE group_name IN ({placeholders})", groups)
+            session_ids = [row[0] for row in cursor.fetchall()]
+            
+            if not session_ids:
+                return 0
+            
+            # Delete photos first (foreign key constraint)
+            id_placeholders = ','.join('?' * len(session_ids))
+            cursor.execute(f"DELETE FROM photos WHERE session_id IN ({id_placeholders})", session_ids)
+            
+            # Delete sessions
+            cursor.execute(f"DELETE FROM sessions WHERE group_name IN ({placeholders})", groups)
+            self.conn.commit()
+            
+            logger.info(f"Deleted {len(session_ids)} sessions from groups: {groups}")
+            return len(session_ids)
+    
+    def reset_database(self) -> Dict[str, int]:
+        """Reset entire database by deleting all data.
+        
+        Returns:
+            Dictionary with counts of deleted records
+        """
+        with self.get_cursor() as cursor:
+            # Get counts before deletion
+            cursor.execute("SELECT COUNT(*) FROM photos")
+            photo_count = cursor.fetchone()[0]
+            
+            cursor.execute("SELECT COUNT(*) FROM sessions")
+            session_count = cursor.fetchone()[0]
+            
+            cursor.execute("SELECT COUNT(*) FROM lenses")
+            lens_count = cursor.fetchone()[0]
+            
+            cursor.execute("SELECT COUNT(*) FROM analyses")
+            analysis_count = cursor.fetchone()[0]
+            
+            # Delete all data (order matters due to foreign keys)
+            cursor.execute("DELETE FROM photos")
+            cursor.execute("DELETE FROM sessions")
+            cursor.execute("DELETE FROM lenses")
+            cursor.execute("DELETE FROM analyses")
+            
+            # Reset auto-increment counters (SQLite specific)
+            cursor.execute("DELETE FROM sqlite_sequence")
+            
+            self.conn.commit()
+            
+            logger.info(f"Database reset: {session_count} sessions, {photo_count} photos, {lens_count} lenses, {analysis_count} analyses deleted")
+            
+            return {
+                'sessions': session_count,
+                'photos': photo_count,
+                'lenses': lens_count,
+                'analyses': analysis_count
+            }
+    
     def __enter__(self):
         """Context manager entry."""
         return self
