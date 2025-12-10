@@ -108,6 +108,16 @@
                         </select>
                         <button id="run-analysis-btn" class="btn-primary">Run Analysis</button>
                     </div>
+                    <div id="session-filter-container" style="display: none; margin-bottom: 15px;">
+                        <label style="display: block; margin-bottom: 5px; font-weight: 500;">Sessions:</label>
+                        <p style="font-size: 0.85em; color: var(--text-secondary); margin: 0 0 8px 0;">Leave empty for all sessions, or select specific sessions</p>
+                        <select id="analysis-session-filter" multiple style="width: 100%; min-height: 120px; padding: 8px; background-color: var(--background); color: var(--text-primary); border: 1px solid var(--border-color); border-radius: 6px;">
+                        </select>
+                        <div style="margin-top: 5px; display: flex; gap: 10px;">
+                            <button id="select-all-sessions" class="btn-secondary" style="padding: 5px 15px; font-size: 0.9em;">Select All</button>
+                            <button id="deselect-all-sessions" class="btn-secondary" style="padding: 5px 15px; font-size: 0.9em;">Deselect All</button>
+                        </div>
+                    </div>
                     <div id="analysis-filter-info" style="font-size: 0.9em; color: var(--text-secondary);"></div>
                 </div>
 

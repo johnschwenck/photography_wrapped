@@ -91,6 +91,8 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('run-analysis-btn').addEventListener('click', runDatabaseAnalysis);
     document.getElementById('analysis-category-filter').addEventListener('change', updateAnalysisFilterInfo);
     document.getElementById('analysis-group-filter').addEventListener('change', updateAnalysisFilterInfo);
+    document.getElementById('select-all-sessions').addEventListener('click', () => selectAllSessions(true));
+    document.getElementById('deselect-all-sessions').addEventListener('click', () => selectAllSessions(false));
     
     // Load analysis filters when tab is clicked
     document.querySelector('[data-tab="analyze"]').addEventListener('click', () => {
@@ -468,6 +470,7 @@ async function extractAllFromQueue() {
 let allCategories = [];
 let allGroups = [];
 let categoryGroupMap = {};
+let allSessions = [];
 
 async function loadAnalysisFilters() {
     try {
@@ -479,11 +482,13 @@ async function loadAnalysisFilters() {
         allCategories = data.categories;
         allGroups = data.groups;
         
-        // Build category-group mapping
+        // Build category-group mapping and load all sessions
         const dbResponse = await fetch(`${API_BASE}/database/overview`);
         const dbData = await dbResponse.json();
         if (dbResponse.ok && dbData.success) {
             categoryGroupMap = {};
+            allSessions = dbData.sessions;
+            
             dbData.sessions.forEach(session => {
                 const cat = session.category || '';
                 const grp = session.group || '';
@@ -551,6 +556,7 @@ function updateAnalysisFilterInfo() {
     const categoryFilter = document.getElementById('analysis-category-filter');
     const groupFilter = document.getElementById('analysis-group-filter');
     const filterInfo = document.getElementById('analysis-filter-info');
+    const sessionContainer = document.getElementById('session-filter-container');
     
     // Update group dropdown based on category selection
     updateGroupFilter();
@@ -558,24 +564,87 @@ function updateAnalysisFilterInfo() {
     const category = categoryFilter.value;
     const group = groupFilter.value;
     
+    // Show/hide session filter based on group selection
+    if (group) {
+        updateSessionFilter(category, group);
+        sessionContainer.style.display = 'block';
+    } else {
+        sessionContainer.style.display = 'none';
+    }
+    
+    // Update filter info text
     if (!category && !group) {
         filterInfo.textContent = 'Analyzing entire database';
     } else {
         let parts = [];
         if (category) parts.push(`Category: ${category}`);
         if (group) parts.push(`Group: ${group}`);
+        
+        const sessionFilter = document.getElementById('analysis-session-filter');
+        const selectedSessions = Array.from(sessionFilter.selectedOptions).map(opt => opt.value);
+        if (group && sessionFilter.options.length > 0) {
+            if (selectedSessions.length === 0) {
+                parts.push('all sessions');
+            } else if (selectedSessions.length < sessionFilter.options.length) {
+                parts.push(`${selectedSessions.length} sessions`);
+            }
+        }
+        
         filterInfo.textContent = `Filtered by ${parts.join(', ')}`;
     }
+}
+
+function updateSessionFilter(category, group) {
+    const sessionFilter = document.getElementById('analysis-session-filter');
+    
+    // Filter sessions by category and group
+    const filteredSessions = allSessions.filter(session => {
+        const matchesCategory = !category || session.category === category;
+        const matchesGroup = !group || session.group === group;
+        return matchesCategory && matchesGroup;
+    });
+    
+    // Populate session dropdown (nothing selected by default - means "All Sessions")
+    sessionFilter.innerHTML = '';
+    filteredSessions.forEach(session => {
+        const option = document.createElement('option');
+        option.value = session.name;
+        option.textContent = `${session.name} (${session.total_photos} photos)`;
+        option.selected = false;  // Nothing selected = analyze all sessions
+        sessionFilter.appendChild(option);
+    });
+    
+    console.log('Session filter updated:', filteredSessions.length, 'sessions');
+}
+
+function selectAllSessions(select) {
+    const sessionFilter = document.getElementById('analysis-session-filter');
+    Array.from(sessionFilter.options).forEach(option => {
+        option.selected = select;
+    });
+    updateAnalysisFilterInfo();
 }
 
 async function runDatabaseAnalysis() {
     const categoryFilter = document.getElementById('analysis-category-filter');
     const groupFilter = document.getElementById('analysis-group-filter');
+    const sessionFilter = document.getElementById('analysis-session-filter');
     const resultsArea = document.getElementById('analyze-results');
     const progressBar = document.getElementById('progress-bar');
     
     const category = categoryFilter.value || null;
     const group = groupFilter.value || null;
+    
+    // Get selected sessions if any are specifically selected
+    // If none selected, sessions = null means "analyze all sessions in group"
+    let sessions = null;
+    if (group && sessionFilter.options.length > 0) {
+        const selected = Array.from(sessionFilter.selectedOptions).map(opt => opt.value);
+        if (selected.length > 0) {
+            sessions = selected;
+        }
+        // If no sessions selected, sessions stays null = analyze entire group
+    }
     
     resultsArea.innerHTML = '';
     progressBar.style.display = 'block';
@@ -585,7 +654,7 @@ async function runDatabaseAnalysis() {
         const response = await fetch(`${API_BASE}/analyze/database`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ category, group })
+            body: JSON.stringify({ category, group, sessions })
         });
         
         updateProgressBar(50, 'Processing data...');
@@ -1133,6 +1202,56 @@ async function analyzeData() {
 function displayAnalysisResults(analysis) {
     const resultsArea = document.getElementById('analyze-results');
     resultsArea.classList.add('visible');
+
+    // Debug logging
+    console.log('displayAnalysisResults called with:', analysis);
+    console.log('analysis.scope:', analysis.scope);
+    console.log('analysis.total_photos:', analysis.total_photos);
+    console.log('analysis.lens_freq:', analysis.lens_freq);
+
+    // Handle sessions-specific analysis
+    if (analysis.scope === 'sessions') {
+        let html = `
+            <h2 style="margin-bottom: 20px;">Selected Sessions Analysis</h2>
+            <div class="result-card">
+                <h3>Overview</h3>
+                <div class="stat-grid">
+                    <div class="stat-item">
+                        <div class="stat-label">Sessions Analyzed</div>
+                        <div class="stat-value">${analysis.total_sessions}</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-label">Total Photos</div>
+                        <div class="stat-value">${analysis.total_photos.toLocaleString()}</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-label">RAW Photos</div>
+                        <div class="stat-value">${analysis.total_raw_photos.toLocaleString()}</div>
+                    </div>
+                    ${analysis.average_hit_rate ? `
+                    <div class="stat-item">
+                        <div class="stat-label">Average Hit Rate</div>
+                        <div class="stat-value">${analysis.average_hit_rate}%</div>
+                    </div>
+                    ` : ''}
+                </div>
+            </div>
+        `;
+        
+        // List sessions
+        if (analysis.sessions && analysis.sessions.length > 0) {
+            html += '<div class="result-card"><h3>Sessions</h3>';
+            analysis.sessions.forEach(session => {
+                html += `<p><strong>${escapeHtml(session.name)}:</strong> ${session.total_photos} photos`;
+                if (session.hit_rate) html += ` (${session.hit_rate}% hit rate)`;
+                html += `</p>`;
+            });
+            html += '</div>';
+        }
+        
+        resultsArea.innerHTML = html;
+        return;
+    }
 
     // Handle database-wide analysis (different structure)
     if (analysis.scope === 'database') {

@@ -386,6 +386,7 @@ def analyze_database():
     Request Body:
         category: Optional category filter
         group: Optional group filter
+        sessions: Optional list of specific session names to analyze
     
     Returns:
         JSON with comprehensive analysis results
@@ -394,12 +395,46 @@ def analyze_database():
         data = request.get_json() or {}
         category = data.get('category')
         group = data.get('group')
+        sessions = data.get('sessions')  # List of session names
         
         db = DatabaseManager.from_config(CONFIG_PATH)
         analyzer = StatisticsAnalyzer(db)
         
         # Build analysis based on filters
-        if category and group:
+        if sessions and len(sessions) > 0:
+            # Analyze specific sessions
+            conn = db.conn
+            placeholders = ','.join('?' * len(sessions))
+            session_rows = conn.execute(
+                f"SELECT * FROM sessions WHERE name IN ({placeholders})",
+                sessions
+            ).fetchall()
+            
+            if not session_rows:
+                return jsonify({'error': 'No matching sessions found'}), 404
+            
+            # Calculate statistics for selected sessions
+            total_sessions = len(session_rows)
+            total_photos = sum(s['total_photos'] for s in session_rows)
+            total_raw = sum(s['total_raw_photos'] or 0 for s in session_rows)
+            
+            hit_rates = [s['hit_rate'] for s in session_rows if s['hit_rate'] is not None]
+            avg_hit_rate = sum(hit_rates) / len(hit_rates) if hit_rates else None
+            
+            analysis_dict = {
+                'scope': 'sessions',
+                'total_sessions': total_sessions,
+                'total_photos': total_photos,
+                'total_raw_photos': total_raw,
+                'average_hit_rate': round(avg_hit_rate, 2) if avg_hit_rate else None,
+                'sessions': [dict(s) for s in session_rows]
+            }
+            
+            return jsonify({
+                'success': True,
+                'analysis': analysis_dict
+            })
+        elif category and group:
             # Analyze specific group within category
             analysis = analyzer.analyze_group(group)
         elif category:
