@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Photography Wrapped</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Photography Wrapped</h1>
+            <p class="tagline">Analyze photography metadata and see the year in review</p>
+        </header>
+
+        <main>
+            <!-- Navigation Tabs -->
+            <nav class="tabs">
+                <button class="tab-button active" data-tab="extract">Extract</button>
+                <button class="tab-button" data-tab="analyze">Analysis</button>
+                <button class="tab-button" data-tab="database">Database</button>
+            </nav>
+
+            <!-- Extract Tab -->
+            <section id="extract-tab" class="tab-content active">
+                <h2>Extract Metadata</h2>
+                <p>Build a queue of folders to extract, then process them all at once</p>
+
+                <div class="extract-layout">
+                    <!-- Left Panel: Folder Selection -->
+                    <div class="extract-left">
+                        <h3>Add Folders</h3>
+
+                        <div class="form-group">
+                            <label for="mode-select">Mode:</label>
+                            <select id="mode-select">
+                                <option value="single">Single Folder</option>
+                                <option value="crawl">Crawl Multiple Folders</option>
+                            </select>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="folder-path">Folder Path:</label>
+                            <input type="text" id="folder-path" placeholder="E:\Photos\Running\2025\turkey-trot">
+                            <small>Paste or type the complete folder path. Right-click a folder in Windows Explorer → Copy as Path</small>
+                        </div>
+
+                        <div id="crawl-options" style="display: none;">
+                            <div class="form-group">
+                                <label for="target-folder">Target Folder Name:</label>
+                                <input type="text" id="target-folder" placeholder="e.g., Edited, Photos">
+                                <small>The system will find all folders with this name</small>
+                            </div>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="session-name">Session Name:</label>
+                            <input type="text" id="session-name" placeholder="Optional - auto-generated from folder">
+                        </div>
+
+                        <div class="form-group">
+                            <label for="category">Category:</label>
+                            <input type="text" id="category" placeholder="e.g., running, concerts, travel">
+                        </div>
+
+                        <div class="form-group">
+                            <label for="group">Group:</label>
+                            <input type="text" id="group" placeholder="e.g., thesole, idkhow, europe2025">
+                        </div>
+
+                        <div class="form-group">
+                            <label>
+                                <input type="checkbox" id="calculate-hit-rate" checked>
+                                Calculate Hit Rate (edited vs RAW photos)
+                            </label>
+                        </div>
+
+                        <button id="add-to-queue-btn" class="btn-primary">Add to Queue</button>
+                    </div>
+
+                    <!-- Right Panel: Extraction Queue -->
+                    <div class="extract-right">
+                        <h3>Extraction Queue</h3>
+                        <div id="extraction-queue" class="extraction-queue">
+                            <p class="empty-queue">No folders added yet. Add folders from the left to build your extraction queue.</p>
+                        </div>
+                        
+                        <button id="extract-all-btn" class="btn-primary" style="display: none;">Extract All Metadata</button>
+                        
+                        <div id="extract-results" class="results-area"></div>
+                        
+                        <button id="analyze-extracted-btn" class="btn-primary" style="display: none; margin-top: 15px;">Analyze</button>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Analyze Tab -->
+            <section id="analyze-tab" class="tab-content">
+                <h2>Analysis</h2>
+                <p>Generate statistics and insights from extracted data</p>
+
+                <div id="extracted-info" class="result-card" style="display: none;">
+                    <h3>Extracted Data Summary</h3>
+                    <div id="extracted-summary"></div>
+                    <button id="run-analysis-btn" class="btn-primary" style="margin-top: 15px;">Run Analysis</button>
+                </div>
+
+                <div id="progress-bar" class="progress-bar" style="display: none;">
+                    <div class="progress-fill"></div>
+                    <div class="progress-text">Processing...</div>
+                </div>
+
+                <div id="analyze-results" class="results-area"></div>
+            </section>
+
+            <!-- Database Tab -->
+            <section id="database-tab" class="tab-content">
+                <h2>Database Overview</h2>
+                <p>View all sessions and database statistics</p>
+
+                <div id="db-summary" class="result-card" style="margin-bottom: 20px;">
+                    <h3>Database Summary</h3>
+                    <div id="db-summary-content">
+                        <p>Loading...</p>
+                    </div>
+                </div>
+
+                <div class="db-filters" style="display: flex; gap: 10px; margin-bottom: 15px; flex-wrap: wrap;">
+                    <input type="text" id="search-session" placeholder="Search session name..." style="flex: 1; min-width: 200px;">
+                    <input type="text" id="filter-db-category" placeholder="Filter category..." style="flex: 1; min-width: 150px;">
+                    <input type="text" id="filter-db-group" placeholder="Filter group..." style="flex: 1; min-width: 150px;">
+                    <button id="refresh-db-btn" class="btn-secondary">Refresh</button>
+                </div>
+
+                <div id="db-table-container" style="overflow-x: auto;">
+                    <table id="db-sessions-table" style="width: 100%; border-collapse: collapse;">
+                        <thead>
+                            <tr style="background-color: var(--secondary-bg); border-bottom: 2px solid var(--border-color);">
+                                <th style="padding: 12px; text-align: left; cursor: pointer;" data-sort="name">Session Name ▼</th>
+                                <th style="padding: 12px; text-align: left; cursor: pointer;" data-sort="category">Category ▼</th>
+                                <th style="padding: 12px; text-align: left; cursor: pointer;" data-sort="group">Group ▼</th>
+                                <th style="padding: 12px; text-align: right; cursor: pointer;" data-sort="photos">Photos ▼</th>
+                                <th style="padding: 12px; text-align: right; cursor: pointer;" data-sort="raw">RAW ▼</th>
+                                <th style="padding: 12px; text-align: right; cursor: pointer;" data-sort="hitrate">Hit Rate ▼</th>
+                                <th style="padding: 12px; text-align: left; cursor: pointer;" data-sort="date">Date ▼</th>
+                            </tr>
+                        </thead>
+                        <tbody id="db-sessions-tbody">
+                            <tr><td colspan="7" style="padding: 20px; text-align: center;">Loading...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <div id="db-stats" style="margin-top: 15px; font-size: 0.9em; color: var(--text-secondary);">
+                    Showing <span id="db-showing-count">0</span> of <span id="db-total-count">0</span> sessions
+                </div>
+            </section>
+        </main>
+
+        <footer>
+            <p>Photography Wrapped - Local Development Server</p>
+            <p>Built for photographers who want to understand their craft through data</p>
+        </footer>
+    </div>
+
+    <!-- Modal for extraction details -->
+    <div id="details-modal" class="modal" style="display: none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="modal-title">Extraction Details</h2>
+                <span class="modal-close" onclick="closeDetailsModal()">&times;</span>
+            </div>
+            <div id="modal-body" class="modal-body"></div>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>

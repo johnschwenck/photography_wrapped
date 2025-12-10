@@ -126,27 +126,34 @@ class StatisticsAnalyzer:
         
         return analysis
     
-    def analyze_group(self, group_name: str, category_name: str) -> Analysis:
+    def analyze_group(self, group_name: str, category_name: str = None) -> Analysis:
         """
         Analyze all sessions in a group.
         
         Args:
             group_name: Name of the group
-            category_name: Name of the category
+            category_name: Optional name of the category to filter by
         
         Returns:
             Analysis instance for the group
         """
-        sessions = self.db.list_sessions(category=category_name, group=group_name)
+        if category_name:
+            sessions = self.db.list_sessions(category=category_name, group=group_name)
+        else:
+            # Get all sessions with this group name regardless of category
+            sessions = [s for s in self.db.list_sessions() if s.group == group_name]
+        
         session_ids = [s.id for s in sessions if s.id is not None]
         
+        name_parts = [category_name, group_name] if category_name else [group_name]
         analysis = self.analyze_sessions(
             session_ids,
-            name=f"{category_name} - {group_name}"
+            name=" - ".join(name_parts)
         )
         
-        # Store category and group metadata
-        analysis.metadata['category'] = category_name
+        # Store metadata
+        if category_name:
+            analysis.metadata['category'] = category_name
         analysis.metadata['group'] = group_name
         
         # Cache if enabled

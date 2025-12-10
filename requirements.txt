@@ -6,6 +6,11 @@
 PyYAML>=6.0
 pyexiftool>=0.5.5
 
+# Web Server for Local Development
+# ---------------------------------
+Flask>=3.0.0
+Flask-CORS>=4.0.0
+
 # Cloud Storage Support (Optional)
 # --------------------------------
 # AWS S3
