@@ -8,6 +8,7 @@ Supports local and cloud storage providers.
 import os
 import json
 import logging
+import re
 from typing import List, Optional, Dict, Any
 from datetime import datetime
 from fractions import Fraction
@@ -87,6 +88,87 @@ class ExifExtractor:
         supported_extensions = extraction_config.get('supported_extensions', None)
         
         return cls(db=db, storage=storage, supported_extensions=supported_extensions)
+    
+    def extract_date_from_session_name(self, session_name: str) -> Optional[datetime]:
+        """
+        Extract date from session name using heuristics.
+        
+        Supports various date formats commonly used in photography session names:
+        - YYYY-MM-DD or YYYY.MM.DD (ISO format)
+        - MM-DD-YYYY, MM-DD-YY, MM.DD.YY, MM.DD.YYYY
+        - DD-MM-YYYY, DD-MM-YY, DD.MM.YY, DD.MM.YYYY
+        - Partial year formats like 25 (assumed 2025 if 20-40, else 19XX)
+        
+        If multiple dates found, returns the last (rightmost) one as it's closest to the target folder.
+        
+        Args:
+            session_name: The session name to extract date from
+        
+        Returns:
+            datetime object if date found, None otherwise
+        
+        Examples:
+            >>> extractor.extract_date_from_session_name("01_-_2025-04-03")
+            datetime(2025, 4, 3)
+            >>> extractor.extract_date_from_session_name("concert_12.31.25")
+            datetime(2025, 12, 31)
+            >>> extractor.extract_date_from_session_name("running_04-03-25")
+            datetime(2025, 4, 3)
+        """
+        if not session_name:
+            return None
+        
+        # Pattern 1: YYYY-MM-DD or YYYY.MM.DD (ISO format)
+        patterns = [
+            (r'(\d{4})[-.]?(\d{1,2})[-.]?(\d{1,2})', 'YMD'),  # 2025-04-03 or 20250403
+            (r'(\d{1,2})[-.]?(\d{1,2})[-.]?(\d{4})', 'MDY'),  # 04-03-2025 or 04.03.2025
+            (r'(\d{1,2})[-.]?(\d{1,2})[-.]?(\d{2})(?!\d)', 'MDy'),  # 04-03-25 or 04.03.25
+            (r'(\d{2})[-.]?(\d{1,2})[-.]?(\d{1,2})(?!\d)', 'yMD'),  # 25-04-03 or 25.04.03
+        ]
+        
+        # Collect all valid dates found
+        valid_dates = []
+        
+        for pattern, format_type in patterns:
+            # Find all matches (not just first)
+            for match in re.finditer(pattern, session_name):
+                try:
+                    if format_type == 'YMD':
+                        year, month, day = match.groups()
+                        year, month, day = int(year), int(month), int(day)
+                    elif format_type == 'MDY':
+                        month, day, year = match.groups()
+                        month, day, year = int(month), int(day), int(year)
+                    elif format_type == 'MDy':
+                        month, day, year = match.groups()
+                        month, day, year = int(month), int(day), int(year)
+                        # Convert 2-digit year to 4-digit (20-40 = 20XX, else 19XX)
+                        year = 2000 + year if year <= 40 else 1900 + year
+                    elif format_type == 'yMD':
+                        year, month, day = match.groups()
+                        year, month, day = int(year), int(month), int(day)
+                        # Convert 2-digit year to 4-digit
+                        year = 2000 + year if year <= 40 else 1900 + year
+                    
+                    # Validate date components
+                    if 1 <= month <= 12 and 1 <= day <= 31 and 1900 <= year <= 2100:
+                        date = datetime(year, month, day)
+                        # Store with position for sorting (rightmost = closest to folder)
+                        valid_dates.append((match.end(), date))
+                except (ValueError, TypeError) as e:
+                    # Invalid date, try next pattern
+                    continue
+        
+        # Return the rightmost (closest to end of path) valid date
+        if valid_dates:
+            # Sort by position (descending) and return the date from the rightmost match
+            valid_dates.sort(key=lambda x: x[0], reverse=True)
+            selected_date = valid_dates[0][1]
+            logger.info(f"Extracted date from '{session_name}': {selected_date.strftime('%Y-%m-%d')} (rightmost of {len(valid_dates)} found)")
+            return selected_date
+        
+        logger.debug(f"No valid date found in session name: {session_name}")
+        return None
     
     def extract_metadata_from_file(self, file_path: str) -> Optional[Dict[str, Any]]:
         """
@@ -242,7 +324,9 @@ class ExifExtractor:
                       category: str, group: str,
                       raw_folder_path: Optional[str] = None,
                       description: Optional[str] = None,
-                      calculate_hit_rate: bool = True) -> Optional[Session]:
+                      calculate_hit_rate: bool = True,
+                      date: Optional[datetime] = None,
+                      use_date_heuristics: bool = True) -> Optional[Session]:
         """
         Extract metadata from all photos in a folder and create session.
         
@@ -253,6 +337,8 @@ class ExifExtractor:
             group: Group name within category
             description: Optional session description
             calculate_hit_rate: Whether to calculate hit rate (requires RAW folder)
+            date: Optional explicit date for the session
+            use_date_heuristics: Whether to extract date from session name if not provided
         
         Returns:
             Created Session instance with all photos
@@ -282,6 +368,24 @@ class ExifExtractor:
             logger.warning(f"No image files found in {folder_path}")
             return None
         
+        # Extract date using heuristics if enabled and no explicit date provided
+        # Use folder path (which is more likely to contain dates) rather than custom session name
+        session_date = date
+        if not session_date and use_date_heuristics:
+            # Try to extract date from the full folder path
+            # First try the immediate folder name, then work backwards through parent folders
+            logger.info(f"Date heuristics enabled. Analyzing path: '{folder_path}'")
+            
+            # Try extracting from full path first (most specific to least specific)
+            session_date = self.extract_date_from_session_name(folder_path)
+            
+            if session_date:
+                logger.info(f"Date successfully extracted from path: {session_date.strftime('%Y-%m-%d')}")
+            else:
+                logger.info(f"No date pattern found in path: '{folder_path}'")
+        
+        logger.info(f"Creating Session object with date: {session_date} (type: {type(session_date)})")
+        
         # Create session
         session = Session(
             name=session_name,
@@ -289,7 +393,8 @@ class ExifExtractor:
             group=group,
             description=description,
             folder_path=folder_path,
-            total_photos=len(image_files)
+            total_photos=len(image_files),
+            date=session_date
         )
         
         # Try to detect and count RAW folder (optional feature)

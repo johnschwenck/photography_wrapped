@@ -79,6 +79,27 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
+    // Date heuristics checkbox - toggle date input
+    const dateHeuristicsCheckbox = document.getElementById('use-date-heuristics');
+    const sessionDateInput = document.getElementById('session-date');
+    
+    dateHeuristicsCheckbox.addEventListener('change', () => {
+        if (dateHeuristicsCheckbox.checked) {
+            sessionDateInput.disabled = true;
+            sessionDateInput.style.opacity = '0.5';
+            sessionDateInput.style.cursor = 'not-allowed';
+        } else {
+            sessionDateInput.disabled = false;
+            sessionDateInput.style.opacity = '1';
+            sessionDateInput.style.cursor = 'text';
+        }
+    });
+    
+    // Set initial state (heuristics enabled by default)
+    sessionDateInput.disabled = true;
+    sessionDateInput.style.opacity = '0.5';
+    sessionDateInput.style.cursor = 'not-allowed';
+
 
 
     // Add to queue
@@ -290,6 +311,8 @@ function addToQueue() {
     const mode = document.getElementById('mode-select').value;
     const folderPath = document.getElementById('folder-path').value.trim();
     const sessionName = document.getElementById('session-name').value.trim();
+    const sessionDate = document.getElementById('session-date').value.trim();
+    const useDateHeuristics = document.getElementById('use-date-heuristics').checked;
     const category = document.getElementById('category').value.trim();
     const group = document.getElementById('group').value.trim();
     const calculateHitRate = document.getElementById('calculate-hit-rate').checked;
@@ -323,6 +346,8 @@ function addToQueue() {
         mode: mode,
         folderPath: folderPath,
         sessionName: sessionName,
+        sessionDate: sessionDate,
+        useDateHeuristics: useDateHeuristics,
         category: category,
         group: group,
         calculateHitRate: calculateHitRate,
@@ -337,6 +362,8 @@ function addToQueue() {
     // Clear form for next entry
     document.getElementById('folder-path').value = '';
     document.getElementById('session-name').value = '';
+    document.getElementById('session-date').value = '';
+    document.getElementById('use-date-heuristics').checked = true;
     document.getElementById('category').value = '';
     document.getElementById('group').value = '';
     document.getElementById('calculate-hit-rate').checked = true;
@@ -377,6 +404,8 @@ function renderQueue() {
                     <div class="queue-item-detail"><strong>Category:</strong> ${item.category}</div>
                     <div class="queue-item-detail"><strong>Group:</strong> ${item.group}</div>
                     ${item.sessionName ? `<div class="queue-item-detail"><strong>Session:</strong> ${item.sessionName}</div>` : ''}
+                    ${item.sessionDate ? `<div class="queue-item-detail"><strong>Date:</strong> ${item.sessionDate}</div>` : ''}
+                    ${!item.sessionDate && item.useDateHeuristics ? `<div class="queue-item-detail"><strong>Date:</strong> Auto-detect</div>` : ''}
                     ${item.targetFolder ? `<div class="queue-item-detail"><strong>Target Folder:</strong> ${item.targetFolder}</div>` : ''}
                     <div class="queue-item-detail"><strong>Hit Rate:</strong> ${item.calculateHitRate ? 'Yes' : 'No'}</div>
                 </div>
@@ -416,6 +445,8 @@ async function extractAllFromQueue() {
                     body: JSON.stringify({
                         folder_path: item.folderPath,
                         session_name: item.sessionName,
+                        date: item.sessionDate,
+                        use_date_heuristics: item.useDateHeuristics,
                         category: item.category,
                         group: item.group,
                         calculate_hit_rate: item.calculateHitRate
@@ -897,6 +928,7 @@ function displayQueueResults(results, successCount, failCount) {
                                 <p><strong>Category:</strong> ${item.category} | <strong>Group:</strong> ${item.group}</p>
                                 <p><strong>Path:</strong> ${item.folderPath}</p>
                                 <p><strong>Photos:</strong> ${session.total_photos}</p>
+                                ${session.date ? `<p><strong>Date:</strong> ${session.date} (${session.date_detected || 'provided'})</p>` : `<p><strong>Date:</strong> Not found</p>`}
                                 ${session.hit_rate ? `<p><strong>Hit Rate:</strong> ${session.hit_rate.toFixed(1)}%</p>` : ''}
                             </div>
                             <button class="btn-secondary" onclick="showSingleFolderDetails(${JSON.stringify(session).replace(/"/g, '&quot;')}, ${JSON.stringify(item).replace(/"/g, '&quot;')})">Details</button>
@@ -1593,17 +1625,27 @@ function displayDatabaseSummary(summary) {
     `;
     
     if (summary.categories.length > 0) {
-        html += '<div style="margin-bottom: 15px;"><strong>Categories:</strong><br>';
-        summary.categories.forEach(cat => {
-            html += `<span style="margin-right: 15px;">• ${cat.name}: ${cat.sessions} sessions, ${cat.photos.toLocaleString()} photos</span>`;
+        // Sort by photo count descending and take top 3
+        const topCategories = summary.categories
+            .sort((a, b) => b.photos - a.photos)
+            .slice(0, 3);
+        
+        html += '<div style="margin-bottom: 20px;"><strong>Top Categories</strong><br>';
+        topCategories.forEach(cat => {
+            html += `<div style="margin: 5px 0 0 15px;">${cat.name}: ${cat.sessions} sessions, ${cat.photos.toLocaleString()} photos</div>`;
         });
         html += '</div>';
     }
     
     if (summary.groups.length > 0) {
-        html += '<div><strong>Groups:</strong><br>';
-        summary.groups.forEach(grp => {
-            html += `<span style="margin-right: 15px;">• ${grp.name}: ${grp.sessions} sessions, ${grp.photos.toLocaleString()} photos</span>`;
+        // Sort by photo count descending and take top 3
+        const topGroups = summary.groups
+            .sort((a, b) => b.photos - a.photos)
+            .slice(0, 3);
+        
+        html += '<div style="margin-bottom: 20px;"><strong>Top Groups</strong><br>';
+        topGroups.forEach(grp => {
+            html += `<div style="margin: 5px 0 0 15px;">${grp.name}: ${grp.sessions} sessions, ${grp.photos.toLocaleString()} photos</div>`;
         });
         html += '</div>';
     }
@@ -1883,7 +1925,7 @@ function renderDatabaseTable() {
             html += `<td style="padding: 10px;"><input type="text" id="edit-category-${session.id}" value="${escapeHtml(session.category || '')}" onkeypress="if(event.key==='Enter')saveSessionEdit(${session.id})" style="width: 100%; padding: 4px; background: var(--background); color: var(--text-primary); border: 1px solid var(--border-color); border-radius: 4px;"></td>`;
             html += `<td style="padding: 10px;"><input type="text" id="edit-group-${session.id}" value="${escapeHtml(session.group || '')}" onkeypress="if(event.key==='Enter')saveSessionEdit(${session.id})" style="width: 100%; padding: 4px; background: var(--background); color: var(--text-primary); border: 1px solid var(--border-color); border-radius: 4px;"></td>`;
             html += `<td style="padding: 10px; text-align: right;">${session.total_photos}</td>`;
-            html += `<td style="padding: 10px; text-align: right;">${session.total_raw_photos || '-'}</td>`;
+            html += `<td style="padding: 10px; text-align: right;"><input type="number" id="edit-raw-${session.id}" value="${session.total_raw_photos || ''}" placeholder="-" onkeypress="if(event.key==='Enter')saveSessionEdit(${session.id})" style="width: 60px; padding: 4px; background: var(--background); color: var(--text-primary); border: 1px solid var(--border-color); border-radius: 4px; text-align: right;"></td>`;
             html += `<td style="padding: 10px; text-align: right;">${session.hit_rate !== null ? session.hit_rate + '%' : '-'}</td>`;
             html += `<td style="padding: 10px;">${session.date || '-'}</td>`;
             html += `<td style="padding: 10px; text-align: center;">`;
@@ -1986,7 +2028,7 @@ window.showSingleFolderDetails = function(session, item) {
             <p><strong>Total Photos:</strong> ${session.total_photos}</p>
             ${session.total_raw_photos ? `<p><strong>Total RAW Photos:</strong> ${session.total_raw_photos}</p>` : ''}
             ${session.hit_rate ? `<p><strong>Hit Rate:</strong> ${session.hit_rate.toFixed(1)}%</p>` : ''}
-            ${session.date ? `<p><strong>Date:</strong> ${session.date}</p>` : ''}
+            ${session.date ? `<p><strong>Date:</strong> ${session.date} <span style="color: var(--success);">(${session.date_detected || 'provided'})</span></p>` : `<p><strong>Date:</strong> <span style="color: var(--error);">Not found</span></p>`}
             <p><strong>Hit Rate Calculation:</strong> ${item.calculateHitRate ? 'Enabled' : 'Disabled'}</p>
         </div>
     `;
@@ -2077,11 +2119,14 @@ async function saveSessionEdit(sessionId) {
     const nameInput = document.getElementById(`edit-name-${sessionId}`);
     const categoryInput = document.getElementById(`edit-category-${sessionId}`);
     const groupInput = document.getElementById(`edit-group-${sessionId}`);
+    const rawInput = document.getElementById(`edit-raw-${sessionId}`);
     
+    const rawValue = rawInput.value.trim();
     const updatedData = {
         name: nameInput.value.trim(),
         category: categoryInput.value.trim() || null,
-        group: groupInput.value.trim() || null
+        group: groupInput.value.trim() || null,
+        total_raw_photos: rawValue ? parseInt(rawValue) : null
     };
     
     if (!updatedData.name) {

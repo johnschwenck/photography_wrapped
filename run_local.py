@@ -20,6 +20,7 @@ import sys
 import json
 import logging
 from pathlib import Path
+from datetime import datetime
 from typing import Optional, Dict, Any, List
 
 from flask import Flask, request, jsonify, send_from_directory
@@ -133,6 +134,8 @@ def extract_metadata():
         {
             "folder_path": "/path/to/photos",
             "session_name": "Session Name",
+            "date": "2025-04-03",
+            "use_date_heuristics": true,
             "category": "category_name",
             "group": "group_name",
             "description": "Optional description",
@@ -146,10 +149,22 @@ def extract_metadata():
         data = request.json
         folder_path = data.get('folder_path')
         session_name = data.get('session_name') or os.path.basename(folder_path)
+        date_str = data.get('date')
+        use_date_heuristics = data.get('use_date_heuristics', True)
         category = data.get('category', 'personal')
         group = data.get('group', 'ungrouped')
         description = data.get('description')
         calculate_hit_rate = data.get('calculate_hit_rate', True)
+        
+        logger.info(f"Extract request - use_date_heuristics: {use_date_heuristics}, date_str: {date_str}, folder: {folder_path}")
+        
+        # Parse date if provided
+        session_date = None
+        if date_str:
+            try:
+                session_date = datetime.fromisoformat(date_str)
+            except ValueError:
+                logger.warning(f"Invalid date format: {date_str}")
         
         if not folder_path:
             return jsonify({'error': 'folder_path is required'}), 400
@@ -167,11 +182,21 @@ def extract_metadata():
             category=category,
             group=group,
             description=description,
-            calculate_hit_rate=calculate_hit_rate
+            calculate_hit_rate=calculate_hit_rate,
+            date=session_date,
+            use_date_heuristics=use_date_heuristics
         )
         
         if not session:
             return jsonify({'error': 'Extraction failed'}), 500
+        
+        # Determine date detection status
+        date_detected = 'not found'
+        if session.date:
+            if session_date:
+                date_detected = 'provided'
+            elif use_date_heuristics:
+                date_detected = 'found'
         
         return jsonify({
             'success': True,
@@ -183,7 +208,8 @@ def extract_metadata():
                 'total_photos': session.total_photos,
                 'total_raw_photos': session.total_raw_photos,
                 'hit_rate': session.hit_rate,
-                'date': session.date.isoformat() if session.date else None
+                'date': session.date.strftime('%Y-%m-%d') if session.date else None,
+                'date_detected': date_detected
             }
         })
         
@@ -848,6 +874,7 @@ def update_session(session_id):
         name: New session name
         category: New category (optional)
         group: New group (optional)
+        total_raw_photos: Total RAW photos count (optional, will auto-calculate hit_rate if provided)
     
     Returns:
         JSON with success status
@@ -857,24 +884,35 @@ def update_session(session_id):
         name = data.get('name')
         category = data.get('category')
         group = data.get('group')
+        total_raw_photos = data.get('total_raw_photos')
         
         if not name:
             return jsonify({'error': 'Session name is required'}), 400
         
         db = DatabaseManager.from_config(CONFIG_PATH)
         
+        # Get current session to access total_photos for hit rate calculation
+        session = db.get_session(session_id)
+        if not session:
+            return jsonify({'error': 'Session not found'}), 404
+        
+        # Calculate hit rate if both total_photos and total_raw_photos are present
+        hit_rate = None
+        if session.total_photos and total_raw_photos and total_raw_photos > 0:
+            hit_rate = round((session.total_photos / total_raw_photos) * 100, 1)
+        
         # Update session
         with db.get_cursor() as cursor:
             cursor.execute("""
                 UPDATE sessions 
-                SET name = ?, category = ?, group_name = ?, updated_at = CURRENT_TIMESTAMP
+                SET name = ?, category = ?, group_name = ?, total_raw_photos = ?, hit_rate = ?, updated_at = CURRENT_TIMESTAMP
                 WHERE id = ?
-            """, (name, category, group, session_id))
+            """, (name, category, group, total_raw_photos, hit_rate, session_id))
             
             if cursor.rowcount == 0:
                 return jsonify({'error': 'Session not found'}), 404
         
-        logger.info(f"Updated session {session_id}: {name}")
+        logger.info(f"Updated session {session_id}: {name} (RAW: {total_raw_photos}, Hit Rate: {hit_rate}%)")
         
         return jsonify({
             'success': True,

@@ -40,6 +40,16 @@
                         </div>
 
                         <div class="form-group">
+                            <label for="category">Category:</label>
+                            <input type="text" id="category" placeholder="e.g., running, concerts, travel">
+                        </div>
+
+                        <div class="form-group">
+                            <label for="group">Group:</label>
+                            <input type="text" id="group" placeholder="e.g., thesole, idkhow, europe2025">
+                        </div>
+
+                        <div class="form-group">
                             <label for="folder-path">Folder Path:</label>
                             <input type="text" id="folder-path" placeholder="E:\Photos\Running\2025\turkey-trot">
                             <small>Paste or type the complete folder path. Right-click a folder in Windows Explorer → Copy as Path</small>
@@ -55,20 +65,24 @@
 
                         <div class="form-group">
                             <label for="session-name">Session Name:</label>
-                            <input type="text" id="session-name" placeholder="Optional - auto-generated from folder">
+                            <input type="text" id="session-name" placeholder="e.g., Modern Alibi - Asheville">
+                            <small>Optional - auto-generated from folder</small>
                         </div>
 
                         <div class="form-group">
-                            <label for="category">Category:</label>
-                            <input type="text" id="category" placeholder="e.g., running, concerts, travel">
+                            <label for="session-date">Date:</label>
+                            <input type="date" id="session-date" placeholder="Optional - auto-detected from session name">
                         </div>
 
                         <div class="form-group">
-                            <label for="group">Group:</label>
-                            <input type="text" id="group" placeholder="e.g., thesole, idkhow, europe2025">
+                            <label>
+                                <input type="checkbox" id="use-date-heuristics" checked>
+                                Use heuristics to infer Date from folder path
+                            </label>
                         </div>
 
                         <div class="form-group">
+                            <label><strong>Metrics:</strong></label>
                             <label>
                                 <input type="checkbox" id="calculate-hit-rate" checked>
                                 Calculate Hit Rate (edited vs RAW photos)
@@ -200,7 +214,7 @@
                                 <th style="padding: 12px; text-align: left; cursor: pointer;" data-sort="name">Session Name ▼</th>
                                 <th style="padding: 12px; text-align: left; cursor: pointer;" data-sort="category">Category ▼</th>
                                 <th style="padding: 12px; text-align: left; cursor: pointer;" data-sort="group">Group ▼</th>
-                                <th style="padding: 12px; text-align: right; cursor: pointer;" data-sort="photos">Photos ▼</th>
+                                <th style="padding: 12px; text-align: right; cursor: pointer;" data-sort="photos">Final Edits ▼</th>
                                 <th style="padding: 12px; text-align: right; cursor: pointer;" data-sort="raw">RAW ▼</th>
                                 <th style="padding: 12px; text-align: right; cursor: pointer;" data-sort="hitrate">Hit Rate ▼</th>
                                 <th style="padding: 12px; text-align: left; cursor: pointer;" data-sort="date">Date ▼</th>

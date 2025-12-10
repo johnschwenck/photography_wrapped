@@ -333,6 +333,9 @@ class DatabaseManager:
             assert category.id is not None, "Category ID should not be None after creation"
             group = self.get_or_create_group(session.group, category.id)
             
+            # Debug logging for date
+            logger.info(f"Creating session '{session.name}' with date: {session.date} (type: {type(session.date)})")
+            
             cursor.execute("""
                 INSERT INTO sessions (
                     name, category, group_name, category_id, group_id,
@@ -678,27 +681,22 @@ class DatabaseManager:
             cursor.execute("SELECT COUNT(*) FROM lenses")
             lens_count = cursor.fetchone()[0]
             
-            cursor.execute("SELECT COUNT(*) FROM analyses")
-            analysis_count = cursor.fetchone()[0]
-            
             # Delete all data (order matters due to foreign keys)
             cursor.execute("DELETE FROM photos")
             cursor.execute("DELETE FROM sessions")
             cursor.execute("DELETE FROM lenses")
-            cursor.execute("DELETE FROM analyses")
             
             # Reset auto-increment counters (SQLite specific)
             cursor.execute("DELETE FROM sqlite_sequence")
             
             self.conn.commit()
             
-            logger.info(f"Database reset: {session_count} sessions, {photo_count} photos, {lens_count} lenses, {analysis_count} analyses deleted")
+            logger.info(f"Database reset: {session_count} sessions, {photo_count} photos, {lens_count} lenses deleted")
             
             return {
                 'sessions': session_count,
                 'photos': photo_count,
-                'lenses': lens_count,
-                'analyses': analysis_count
+                'lenses': lens_count
             }
     
     def __enter__(self):
