@@ -836,6 +836,91 @@ def delete_by_group():
         return jsonify({'error': str(e)}), 500
 
 
+@app.route('/api/database/session/<int:session_id>', methods=['PUT'])
+def update_session(session_id):
+    """
+    Update a session's basic information.
+    
+    Args:
+        session_id: Session ID to update
+    
+    Request Body:
+        name: New session name
+        category: New category (optional)
+        group: New group (optional)
+    
+    Returns:
+        JSON with success status
+    """
+    try:
+        data = request.get_json() or {}
+        name = data.get('name')
+        category = data.get('category')
+        group = data.get('group')
+        
+        if not name:
+            return jsonify({'error': 'Session name is required'}), 400
+        
+        db = DatabaseManager.from_config(CONFIG_PATH)
+        
+        # Update session
+        with db.get_cursor() as cursor:
+            cursor.execute("""
+                UPDATE sessions 
+                SET name = ?, category = ?, group_name = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+            """, (name, category, group, session_id))
+            
+            if cursor.rowcount == 0:
+                return jsonify({'error': 'Session not found'}), 404
+        
+        logger.info(f"Updated session {session_id}: {name}")
+        
+        return jsonify({
+            'success': True,
+            'message': 'Session updated successfully'
+        })
+        
+    except Exception as e:
+        logger.error(f"Error updating session {session_id}: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/database/session/<int:session_id>', methods=['DELETE'])
+def delete_session(session_id):
+    """
+    Delete a single session and all its photo metadata.
+    
+    Args:
+        session_id: Session ID to delete
+    
+    Returns:
+        JSON with success status
+    """
+    try:
+        db = DatabaseManager.from_config(CONFIG_PATH)
+        
+        # Get session name for logging
+        session = db.get_session(session_id)
+        if not session:
+            return jsonify({'error': 'Session not found'}), 404
+        
+        # Delete session (CASCADE will delete associated photos)
+        with db.get_cursor() as cursor:
+            cursor.execute("DELETE FROM sessions WHERE id = ?", (session_id,))
+        
+        logger.info(f"Deleted session {session_id}: {session.name}")
+        
+        return jsonify({
+            'success': True,
+            'message': f'Session "{session.name}" deleted successfully'
+        })
+        
+    except Exception as e:
+        logger.error(f"Error deleting session {session_id}: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/api/categories', methods=['GET'])
 def list_categories():
     """
@@ -991,6 +1076,8 @@ def main():
     logger.info("  POST /api/database/reset - Reset entire database")
     logger.info("  POST /api/database/delete-category - Delete by category")
     logger.info("  POST /api/database/delete-group - Delete by group")
+    logger.info("  PUT  /api/database/session/<id> - Update session")
+    logger.info("  DELETE /api/database/session/<id> - Delete session")
     logger.info("  GET  /api/categories      - List categories")
     logger.info("  GET  /api/groups          - List groups")
     logger.info("")

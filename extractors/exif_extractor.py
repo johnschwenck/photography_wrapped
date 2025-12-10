@@ -212,9 +212,10 @@ class ExifExtractor:
     
     def detect_raw_folder(self, edited_folder_path: str) -> Optional[str]:
         """
-        Try to find a corresponding RAW folder for an edited folder.
+        Try to find a corresponding RAW folder one level above the edited folder.
         
-        Checks for a sibling 'RAW' folder at the same level as the edited folder.
+        Checks if the parent directory (one level up) contains RAW files.
+        This assumes structure like: /session/RAW/ and /session/Edits/
         
         Args:
             edited_folder_path: Path to the edited folder
@@ -222,16 +223,19 @@ class ExifExtractor:
         Returns:
             Path to RAW folder if found, None otherwise
         """
+        # Get the parent directory (one level up from edits folder)
         parent_dir = os.path.dirname(edited_folder_path)
         
-        # Check for common RAW folder names
+        # Check for common RAW folder names in the parent directory
         raw_folder_names = ['RAW', 'Raw', 'raw', 'RAW Files', 'Raws']
         
         for raw_name in raw_folder_names:
             raw_path = os.path.join(parent_dir, raw_name)
             if self.storage.file_exists(raw_path):
+                logger.info(f"Found RAW folder: {raw_path}")
                 return raw_path
         
+        logger.info(f"No RAW folder found for {edited_folder_path} - will skip hit rate calculation")
         return None
     
     def extract_folder(self, folder_path: str, session_name: str,
@@ -288,15 +292,23 @@ class ExifExtractor:
             total_photos=len(image_files)
         )
         
-        # Try to detect and count RAW folder
+        # Try to detect and count RAW folder (optional feature)
+        # Only calculates if RAW folder exists one level above
         if calculate_hit_rate:
             raw_folder = self.detect_raw_folder(folder_path)
             if raw_folder:
                 session.raw_folder_path = raw_folder
                 raw_count = self.count_raw_photos(raw_folder)
-                if raw_count:
+                if raw_count and raw_count > 0:
+                    session.total_raw_photos = raw_count
                     session.calculate_hit_rate(raw_count)
                     logger.info(f"Hit rate: {session.hit_rate:.1f}% ({session.total_photos}/{raw_count})")
+            else:
+                # No RAW folder found - set to None (will be NULL in database)
+                session.raw_folder_path = None
+                session.total_raw_photos = None
+                session.hit_rate = None
+                logger.info(f"No RAW folder - focusing on {session.total_photos} final edits only")
         
         # Save session to database
         session = self.db.create_session(session)

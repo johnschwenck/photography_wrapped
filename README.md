@@ -72,6 +72,72 @@ python cli.py analyze personal/year_2025 --report
 python analyzers/analyze_temporal_trends.py
 ```
 
+## 📁 Understanding Folder Structure & RAW Detection
+
+**IMPORTANT**: This system is designed to work with **final edited photos only**. Point the extraction to your edited/exported photos folder, NOT the parent directory containing RAW files.
+
+### Recommended Folder Structure
+
+The system works best with this structure:
+```
+E:\Photos\Session Name\
+├── Edited\          # ✅ Point extraction HERE (your final JPGs/TIFFs)
+└── RAW\             # System automatically detects this one level up
+```
+
+### How RAW Detection Works
+
+1. **You point to**: The folder containing your **final edited photos**
+2. **System automatically looks**: One level up for a folder named `RAW`, `Raw`, `raw`, `RAW Files`, or `Raws`
+3. **If RAW folder found**: Calculates hit rate (edited photos / RAW photos)
+4. **If no RAW folder**: Sets hit rate to `-` (null) and focuses on edited photos only
+
+### ⚠️ Common Mistakes to Avoid
+
+**❌ WRONG - Don't point to parent directory:**
+```
+E:\Photos\2025-07-19 - Costa\    # Contains multiple subfolders
+├── Photos\
+│   ├── Edited\    # 28 JPGs (what you want)
+│   └── RAW\       # 767 ARW files
+└── Videos\        # 377 MP4 files
+
+Pointing here will scan EVERYTHING recursively = wrong totals!
+```
+
+**✅ CORRECT - Point to the edited folder:**
+```
+E:\Photos\2025-07-19 - Costa\Photos\Edited\    # ← Extract from here!
+
+System will automatically look for:
+E:\Photos\2025-07-19 - Costa\Photos\RAW\       # ← Found! Calculate hit rate
+```
+
+### Example Scenarios
+
+#### Scenario 1: With RAW Files (Hit Rate Calculation)
+```
+Session Folder/
+├── Edited/         # 25 JPGs ← Point here
+└── RAW/           # 250 RAW files ← Auto-detected
+
+Result: 25 photos, Hit rate: 10.0% (25/250)
+```
+
+#### Scenario 2: Without RAW Files (Edits Only)
+```
+Session Folder/
+└── Edited/        # 40 JPGs ← Point here
+
+Result: 40 photos, Hit rate: - (no RAW folder found)
+```
+
+#### Scenario 3: Flat Structure (No RAW Files)
+```
+Session Folder/    # 100 JPGs directly here ← Point here
+Result: 100 photos, Hit rate: - (no RAW folder found)
+```
+
 ## Walkthrough Example: The Sole Running Club
 
 Here's a complete walkthrough using photos from "The Sole" running club as an example:
@@ -82,12 +148,10 @@ Assume you have a folder structure like this:
 ```
 E:\Photos\The Sole\
 ├── 01 - 2025-04-03\
-│   ├── Photos\
-│   │   └── Edited\      # Your edited JPGs
-│   └── RAW\             # Your RAW files
+│   ├── Edited\          # Your edited JPGs ← Extraction targets these
+│   └── RAW\             # Auto-detected for hit rate
 ├── 02 - 2025-04-10\
-│   ├── Photos\
-│   │   └── Edited\
+│   ├── Edited\
 │   └── RAW\
 └── ... (more weeks)
 ```
@@ -102,8 +166,9 @@ python cli.py crawl "E:\Photos\The Sole" --category running --group thesole --ta
 
 This command:
 - Recursively finds all folders named "Edited"
-- Extracts EXIF metadata from each
-- Automatically detects sibling RAW folders
+- Extracts EXIF metadata from each edited photo
+- Automatically detects RAW folders one level up from each Edited folder
+- Calculates hit rate if RAW folder exists
 - Creates separate sessions for each week
 - Names sessions based on folder structure (e.g., "01_-_2025-04-03")
 

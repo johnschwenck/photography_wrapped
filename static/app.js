@@ -1535,8 +1535,13 @@ function displayWrappedResults(wrapped) {
 let dbData = {
     sessions: [],
     filteredSessions: [],
-    sortColumn: 'date',
-    sortDirection: 'desc'
+    sortColumn: 'category',
+    sortDirection: 'asc',
+    filters: {
+        category: '',
+        group: ''
+    },
+    editingSessionId: null
 };
 
 async function loadDatabaseOverview() {
@@ -1544,7 +1549,7 @@ async function loadDatabaseOverview() {
     const tbody = document.getElementById('db-sessions-tbody');
     
     summaryContent.innerHTML = '<p>Loading...</p>';
-    tbody.innerHTML = '<tr><td colspan="7" style="padding: 20px; text-align: center;">Loading...</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="8" style="padding: 20px; text-align: center;">Loading...</td></tr>';
 
     try {
         const response = await fetch(`${API_BASE}/database/overview`);
@@ -1635,7 +1640,7 @@ function sortDatabaseTable(column, skipToggle = false) {
         }
     }
     
-    // Sort filtered sessions
+    // Sort filtered sessions with multi-level sorting
     dbData.filteredSessions.sort((a, b) => {
         let aVal, bVal;
         
@@ -1672,9 +1677,25 @@ function sortDatabaseTable(column, skipToggle = false) {
                 return 0;
         }
         
-        if (aVal < bVal) return dbData.sortDirection === 'asc' ? -1 : 1;
-        if (aVal > bVal) return dbData.sortDirection === 'asc' ? 1 : -1;
-        return 0;
+        // Primary sort by selected column
+        let result = 0;
+        if (aVal < bVal) result = dbData.sortDirection === 'asc' ? -1 : 1;
+        else if (aVal > bVal) result = dbData.sortDirection === 'asc' ? 1 : -1;
+        
+        // If equal, apply secondary sorting: category > group > name
+        if (result === 0 && column !== 'category') {
+            const catCompare = a.category.toLowerCase().localeCompare(b.category.toLowerCase());
+            if (catCompare !== 0) return catCompare;
+        }
+        if (result === 0 && column !== 'group') {
+            const groupCompare = a.group.toLowerCase().localeCompare(b.group.toLowerCase());
+            if (groupCompare !== 0) return groupCompare;
+        }
+        if (result === 0 && column !== 'name') {
+            return a.name.toLowerCase().localeCompare(b.name.toLowerCase());
+        }
+        
+        return result;
     });
     
     renderDatabaseTable();
@@ -1845,7 +1866,7 @@ function renderDatabaseTable() {
     const totalCount = document.getElementById('db-total-count');
     
     if (dbData.filteredSessions.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="7" style="padding: 20px; text-align: center;">No sessions match your filters</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="8" style="padding: 20px; text-align: center;">No sessions match your filters</td></tr>';
         showingCount.textContent = '0';
         totalCount.textContent = dbData.sessions.length;
         return;
@@ -1853,14 +1874,37 @@ function renderDatabaseTable() {
     
     let html = '';
     dbData.filteredSessions.forEach(session => {
-        html += '<tr style="border-bottom: 1px solid var(--border-color);">';
-        html += `<td style="padding: 10px;">${session.name}</td>`;
-        html += `<td style="padding: 10px;">${session.category || '-'}</td>`;
-        html += `<td style="padding: 10px;">${session.group || '-'}</td>`;
-        html += `<td style="padding: 10px; text-align: right;">${session.total_photos}</td>`;
-        html += `<td style="padding: 10px; text-align: right;">${session.total_raw_photos || '-'}</td>`;
-        html += `<td style="padding: 10px; text-align: right;">${session.hit_rate !== null ? session.hit_rate + '%' : '-'}</td>`;
-        html += `<td style="padding: 10px;">${session.date || '-'}</td>`;
+        const isEditing = dbData.editingSessionId === session.id;
+        html += `<tr id="session-row-${session.id}" style="border-bottom: 1px solid var(--border-color);">`;
+        
+        if (isEditing) {
+            // Edit mode
+            html += `<td style="padding: 10px;"><input type="text" id="edit-name-${session.id}" value="${escapeHtml(session.name)}" onkeypress="if(event.key==='Enter')saveSessionEdit(${session.id})" style="width: 100%; padding: 4px; background: var(--background); color: var(--text-primary); border: 1px solid var(--border-color); border-radius: 4px;"></td>`;
+            html += `<td style="padding: 10px;"><input type="text" id="edit-category-${session.id}" value="${escapeHtml(session.category || '')}" onkeypress="if(event.key==='Enter')saveSessionEdit(${session.id})" style="width: 100%; padding: 4px; background: var(--background); color: var(--text-primary); border: 1px solid var(--border-color); border-radius: 4px;"></td>`;
+            html += `<td style="padding: 10px;"><input type="text" id="edit-group-${session.id}" value="${escapeHtml(session.group || '')}" onkeypress="if(event.key==='Enter')saveSessionEdit(${session.id})" style="width: 100%; padding: 4px; background: var(--background); color: var(--text-primary); border: 1px solid var(--border-color); border-radius: 4px;"></td>`;
+            html += `<td style="padding: 10px; text-align: right;">${session.total_photos}</td>`;
+            html += `<td style="padding: 10px; text-align: right;">${session.total_raw_photos || '-'}</td>`;
+            html += `<td style="padding: 10px; text-align: right;">${session.hit_rate !== null ? session.hit_rate + '%' : '-'}</td>`;
+            html += `<td style="padding: 10px;">${session.date || '-'}</td>`;
+            html += `<td style="padding: 10px; text-align: center;">`;
+            html += `<button onclick="saveSessionEdit(${session.id})" style="background: none; border: none; cursor: pointer; color: #4CAF50; font-size: 16px; margin-right: 8px;" title="Save">✓</button>`;
+            html += `<button onclick="cancelSessionEdit()" style="background: none; border: none; cursor: pointer; color: #f44336; font-size: 16px;" title="Cancel">✗</button>`;
+            html += `</td>`;
+        } else {
+            // View mode
+            html += `<td style="padding: 10px;">${escapeHtml(session.name)}</td>`;
+            html += `<td style="padding: 10px;">${escapeHtml(session.category || '-')}</td>`;
+            html += `<td style="padding: 10px;">${escapeHtml(session.group || '-')}</td>`;
+            html += `<td style="padding: 10px; text-align: right;">${session.total_photos}</td>`;
+            html += `<td style="padding: 10px; text-align: right;">${session.total_raw_photos || '-'}</td>`;
+            html += `<td style="padding: 10px; text-align: right;">${session.hit_rate !== null ? session.hit_rate + '%' : '-'}</td>`;
+            html += `<td style="padding: 10px;">${session.date || '-'}</td>`;
+            html += `<td style="padding: 10px; text-align: center;">`;
+            html += `<button onclick="editSession(${session.id})" style="background: none; border: none; cursor: pointer; color: var(--text-secondary); font-size: 16px; margin-right: 8px;" title="Edit">✏️</button>`;
+            html += `<button onclick="deleteSession(${session.id}, '${escapeHtml(session.name).replace(/'/g, "\\'")}')" style="background: none; border: none; cursor: pointer; color: var(--text-secondary); font-size: 16px;" title="Delete">🗑️</button>`;
+            html += `</td>`;
+        }
+        
         html += '</tr>';
     });
     
@@ -2015,5 +2059,74 @@ window.onclick = function(event) {
     const modal = document.getElementById('details-modal');
     if (event.target === modal) {
         closeDetailsModal();
+    }
+}
+
+// Database Session Edit/Delete Functions
+function editSession(sessionId) {
+    dbData.editingSessionId = sessionId;
+    renderDatabaseTable();
+}
+
+function cancelSessionEdit() {
+    dbData.editingSessionId = null;
+    renderDatabaseTable();
+}
+
+async function saveSessionEdit(sessionId) {
+    const nameInput = document.getElementById(`edit-name-${sessionId}`);
+    const categoryInput = document.getElementById(`edit-category-${sessionId}`);
+    const groupInput = document.getElementById(`edit-group-${sessionId}`);
+    
+    const updatedData = {
+        name: nameInput.value.trim(),
+        category: categoryInput.value.trim() || null,
+        group: groupInput.value.trim() || null
+    };
+    
+    if (!updatedData.name) {
+        alert('Session name cannot be empty');
+        return;
+    }
+    
+    try {
+        const response = await fetch(`${API_BASE}/database/session/${sessionId}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(updatedData)
+        });
+        
+        const data = await response.json();
+        
+        if (response.ok && data.success) {
+            dbData.editingSessionId = null;
+            await loadDatabaseOverview(); // Reload to get updated data
+        } else {
+            alert(`Failed to update session: ${data.error || 'Unknown error'}`);
+        }
+    } catch (error) {
+        alert(`Error updating session: ${error.message}`);
+    }
+}
+
+async function deleteSession(sessionId, sessionName) {
+    if (!confirm(`Are you sure you want to delete "${sessionName}"?\n\nThis will permanently remove the session and all its photo metadata.`)) {
+        return;
+    }
+    
+    try {
+        const response = await fetch(`${API_BASE}/database/session/${sessionId}`, {
+            method: 'DELETE'
+        });
+        
+        const data = await response.json();
+        
+        if (response.ok && data.success) {
+            await loadDatabaseOverview(); // Reload to get updated data
+        } else {
+            alert(`Failed to delete session: ${data.error || 'Unknown error'}`);
+        }
+    } catch (error) {
+        alert(`Error deleting session: ${error.message}`);
     }
 }
