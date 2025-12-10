@@ -471,6 +471,7 @@ let allCategories = [];
 let allGroups = [];
 let categoryGroupMap = {};
 let allSessions = [];
+let previousCategory = '';  // Track previous category selection
 
 async function loadAnalysisFilters() {
     try {
@@ -543,11 +544,17 @@ function updateGroupFilter() {
             groupFilter.innerHTML += `<option value="${escapeHtml(grp)}">${escapeHtml(grp)}</option>`;
         });
         
-        // Restore previous selection if showing all groups
-        if (currentGroupValue && allGroups.includes(currentGroupValue)) {
+        // Reset to "All Groups" if we just switched FROM a category TO "All Categories"
+        if (previousCategory && !selectedCategory) {
+            groupFilter.value = '';
+        } else if (currentGroupValue && allGroups.includes(currentGroupValue)) {
+            // Otherwise preserve the selection
             groupFilter.value = currentGroupValue;
         }
     }
+    
+    // Update tracking
+    previousCategory = selectedCategory;
     
     console.log('Group filter updated, options count:', groupFilter.options.length);
 }
