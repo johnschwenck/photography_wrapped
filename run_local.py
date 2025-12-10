@@ -378,6 +378,115 @@ def analyze():
         return jsonify({'error': str(e)}), 500
 
 
+@app.route('/api/analyze/database', methods=['POST'])
+def analyze_database():
+    """
+    Analyze data from database with optional filters.
+    
+    Request Body:
+        category: Optional category filter
+        group: Optional group filter
+    
+    Returns:
+        JSON with comprehensive analysis results
+    """
+    try:
+        data = request.get_json() or {}
+        category = data.get('category')
+        group = data.get('group')
+        
+        db = DatabaseManager.from_config(CONFIG_PATH)
+        analyzer = StatisticsAnalyzer(db)
+        
+        # Build analysis based on filters
+        if category and group:
+            # Analyze specific group within category
+            analysis = analyzer.analyze_group(group)
+        elif category:
+            # Analyze entire category
+            analysis = analyzer.analyze_category(category)
+        elif group:
+            # Analyze entire group across all categories
+            analysis = analyzer.analyze_group(group)
+        else:
+            # Analyze entire database
+            # Get all sessions and aggregate
+            conn = db.conn
+            sessions = conn.execute("SELECT * FROM sessions ORDER BY date DESC").fetchall()
+            
+            if not sessions:
+                return jsonify({'error': 'No data in database'}), 404
+            
+            # Calculate global statistics
+            total_sessions = len(sessions)
+            total_photos = sum(s['total_photos'] for s in sessions)
+            total_raw = sum(s['total_raw_photos'] or 0 for s in sessions)
+            
+            # Calculate average hit rate (exclude nulls)
+            hit_rates = [s['hit_rate'] for s in sessions if s['hit_rate'] is not None]
+            avg_hit_rate = sum(hit_rates) / len(hit_rates) if hit_rates else None
+            
+            # Get category breakdown
+            categories = {}
+            for session in sessions:
+                cat = session['category'] or 'Uncategorized'
+                # Use original case but check case-insensitive for duplicates
+                cat_key = cat
+                if cat_key not in categories:
+                    categories[cat_key] = {'sessions': 0, 'photos': 0}
+                categories[cat_key]['sessions'] += 1
+                categories[cat_key]['photos'] += session['total_photos']
+            
+            # Get group breakdown
+            groups = {}
+            for session in sessions:
+                grp = session['group_name'] or 'Ungrouped'
+                # Use original case but check case-insensitive for duplicates
+                grp_key = grp
+                # Check if we already have this group with different case
+                existing_key = None
+                for existing in groups.keys():
+                    if existing.lower() == grp_key.lower():
+                        existing_key = existing
+                        break
+                
+                if existing_key:
+                    groups[existing_key]['sessions'] += 1
+                    groups[existing_key]['photos'] += session['total_photos']
+                else:
+                    groups[grp_key] = {'sessions': 0, 'photos': 0}
+                    groups[grp_key]['sessions'] += 1
+                    groups[grp_key]['photos'] += session['total_photos']
+            
+            analysis_dict = {
+                'scope': 'database',
+                'total_sessions': total_sessions,
+                'total_photos': total_photos,
+                'total_raw_photos': total_raw,
+                'average_hit_rate': round(avg_hit_rate, 2) if avg_hit_rate else None,
+                'categories': categories,
+                'groups': groups,
+                'sessions': [dict(s) for s in sessions[:10]]  # Include first 10 sessions
+            }
+            
+            return jsonify({
+                'success': True,
+                'analysis': analysis_dict
+            })
+        
+        # Convert analysis object to dict if we used analyzer
+        analysis_dict = analysis.to_dict() if hasattr(analysis, 'to_dict') else analysis
+        
+        return jsonify({
+            'success': True,
+            'analysis': analysis_dict
+        })
+        
+    except Exception as e:
+        logger.error(f"Error in analyze_database: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/api/wrapped', methods=['POST'])
 def generate_wrapped():
     """Generate temporal trends analysis with progress tracking."""
@@ -839,6 +948,7 @@ def main():
     logger.info("  POST /api/extract         - Extract metadata from folder")
     logger.info("  POST /api/crawl           - Crawl and extract from multiple folders")
     logger.info("  POST /api/analyze         - Analyze sessions")
+    logger.info("  POST /api/analyze/database - Analyze database with filters")
     logger.info("  POST /api/wrapped         - Generate wrapped report")
     logger.info("  GET  /api/sessions        - List sessions")
     logger.info("  GET  /api/database/overview - Database overview with stats")

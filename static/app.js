@@ -87,20 +87,15 @@ document.addEventListener('DOMContentLoaded', () => {
     // Extract all from queue
     document.getElementById('extract-all-btn').addEventListener('click', extractAllFromQueue);
 
-    // Analyze button - switch to analyze tab and auto-run analysis
-    document.getElementById('analyze-extracted-btn').addEventListener('click', () => {
-        // Switch to analyze tab
-        document.querySelectorAll('.tab-button').forEach(btn => btn.classList.remove('active'));
-        document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
-        document.querySelector('[data-tab="analyze"]').classList.add('active');
-        document.getElementById('analyze-tab').classList.add('active');
-        
-        // Automatically run analysis for all extracted data
-        runAutoAnalysis();
+    // Analysis tab functionality
+    document.getElementById('run-analysis-btn').addEventListener('click', runDatabaseAnalysis);
+    document.getElementById('analysis-category-filter').addEventListener('change', updateAnalysisFilterInfo);
+    document.getElementById('analysis-group-filter').addEventListener('change', updateAnalysisFilterInfo);
+    
+    // Load analysis filters when tab is clicked
+    document.querySelector('[data-tab="analyze"]').addEventListener('click', () => {
+        setTimeout(() => loadAnalysisFilters(), 100);
     });
-
-    // Manual run analysis button
-    document.getElementById('run-analysis-btn').addEventListener('click', runAllAnalyses);
 
     // Database tab functionality
     document.getElementById('refresh-db-btn').addEventListener('click', loadDatabaseOverview);
@@ -399,9 +394,6 @@ async function extractAllFromQueue() {
     const resultsArea = document.getElementById('extract-results');
     resultsArea.classList.add('visible');
     resultsArea.innerHTML = '<div class="loading">Processing queue</div>';
-    
-    // Hide analyze button until extraction completes
-    document.getElementById('analyze-extracted-btn').style.display = 'none';
 
     let successCount = 0;
     let failCount = 0;
@@ -470,10 +462,153 @@ async function extractAllFromQueue() {
     // Clear queue after successful extraction
     extractionQueue = [];
     renderQueue();
+}
+
+// Analysis Functions - Database Driven
+let allCategories = [];
+let allGroups = [];
+let categoryGroupMap = {};
+
+async function loadAnalysisFilters() {
+    try {
+        const response = await fetch(`${API_BASE}/database/categories-groups`);
+        const data = await response.json();
+        
+        if (!response.ok || !data.success) return;
+        
+        allCategories = data.categories;
+        allGroups = data.groups;
+        
+        // Build category-group mapping
+        const dbResponse = await fetch(`${API_BASE}/database/overview`);
+        const dbData = await dbResponse.json();
+        if (dbResponse.ok && dbData.success) {
+            categoryGroupMap = {};
+            dbData.sessions.forEach(session => {
+                const cat = session.category || '';
+                const grp = session.group || '';
+                if (!categoryGroupMap[cat]) categoryGroupMap[cat] = new Set();
+                if (grp) categoryGroupMap[cat].add(grp);
+            });
+        }
+        
+        // Populate category filter
+        const categoryFilter = document.getElementById('analysis-category-filter');
+        categoryFilter.innerHTML = '<option value="">All Categories</option>';
+        allCategories.forEach(cat => {
+            categoryFilter.innerHTML += `<option value="${escapeHtml(cat)}">${escapeHtml(cat)}</option>`;
+        });
+        
+        // Populate group filter (all groups initially)
+        updateGroupFilter();
+        
+        // Show filter info
+        updateAnalysisFilterInfo();
+        
+    } catch (error) {
+        console.error('Error loading analysis filters:', error);
+    }
+}
+
+function updateGroupFilter() {
+    const categoryFilter = document.getElementById('analysis-category-filter');
+    const groupFilter = document.getElementById('analysis-group-filter');
+    const selectedCategory = categoryFilter.value;
+    const currentGroupValue = groupFilter.value;  // Save current selection
     
-    // Show analyze button if any extractions were successful
-    if (successCount > 0) {
-        document.getElementById('analyze-extracted-btn').style.display = 'block';
+    console.log('Updating group filter for category:', selectedCategory);
+    
+    groupFilter.innerHTML = '<option value="">All Groups</option>';
+    
+    if (selectedCategory && categoryGroupMap[selectedCategory]) {
+        // Show only groups in selected category
+        const groupsInCategory = Array.from(categoryGroupMap[selectedCategory]).sort();
+        console.log('Groups in category:', groupsInCategory);
+        groupsInCategory.forEach(grp => {
+            groupFilter.innerHTML += `<option value="${escapeHtml(grp)}">${escapeHtml(grp)}</option>`;
+        });
+        
+        // Try to restore previous selection if it's still valid
+        if (currentGroupValue && groupsInCategory.includes(currentGroupValue)) {
+            groupFilter.value = currentGroupValue;
+        }
+    } else {
+        // Show all groups
+        allGroups.forEach(grp => {
+            groupFilter.innerHTML += `<option value="${escapeHtml(grp)}">${escapeHtml(grp)}</option>`;
+        });
+        
+        // Restore previous selection if showing all groups
+        if (currentGroupValue && allGroups.includes(currentGroupValue)) {
+            groupFilter.value = currentGroupValue;
+        }
+    }
+    
+    console.log('Group filter updated, options count:', groupFilter.options.length);
+}
+
+function updateAnalysisFilterInfo() {
+    const categoryFilter = document.getElementById('analysis-category-filter');
+    const groupFilter = document.getElementById('analysis-group-filter');
+    const filterInfo = document.getElementById('analysis-filter-info');
+    
+    // Update group dropdown based on category selection
+    updateGroupFilter();
+    
+    const category = categoryFilter.value;
+    const group = groupFilter.value;
+    
+    if (!category && !group) {
+        filterInfo.textContent = 'Analyzing entire database';
+    } else {
+        let parts = [];
+        if (category) parts.push(`Category: ${category}`);
+        if (group) parts.push(`Group: ${group}`);
+        filterInfo.textContent = `Filtered by ${parts.join(', ')}`;
+    }
+}
+
+async function runDatabaseAnalysis() {
+    const categoryFilter = document.getElementById('analysis-category-filter');
+    const groupFilter = document.getElementById('analysis-group-filter');
+    const resultsArea = document.getElementById('analyze-results');
+    const progressBar = document.getElementById('progress-bar');
+    
+    const category = categoryFilter.value || null;
+    const group = groupFilter.value || null;
+    
+    resultsArea.innerHTML = '';
+    progressBar.style.display = 'block';
+    updateProgressBar(0, 'Starting analysis...');
+    
+    try {
+        const response = await fetch(`${API_BASE}/analyze/database`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ category, group })
+        });
+        
+        updateProgressBar(50, 'Processing data...');
+        
+        const data = await response.json();
+        
+        if (!response.ok) {
+            progressBar.style.display = 'none';
+            showError('analyze-results', data.error || 'Analysis failed');
+            return;
+        }
+        
+        updateProgressBar(100, 'Complete');
+        setTimeout(() => { progressBar.style.display = 'none'; }, 500);
+        
+        // Log for debugging
+        console.log('Analysis response:', data);
+        
+        displayAnalysisResults(data.analysis);
+        
+    } catch (error) {
+        progressBar.style.display = 'none';
+        showError('analyze-results', `Error: ${error.message}`);
     }
 }
 
@@ -999,6 +1134,62 @@ function displayAnalysisResults(analysis) {
     const resultsArea = document.getElementById('analyze-results');
     resultsArea.classList.add('visible');
 
+    // Handle database-wide analysis (different structure)
+    if (analysis.scope === 'database') {
+        let html = `
+            <h2 style="margin-bottom: 20px;">Database Analysis</h2>
+            <div class="result-card">
+                <h3>Overview</h3>
+                <div class="stat-grid">
+                    <div class="stat-item">
+                        <div class="stat-label">Total Sessions</div>
+                        <div class="stat-value">${analysis.total_sessions}</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-label">Total Photos</div>
+                        <div class="stat-value">${analysis.total_photos.toLocaleString()}</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-label">RAW Photos</div>
+                        <div class="stat-value">${analysis.total_raw_photos.toLocaleString()}</div>
+                    </div>
+                    ${analysis.average_hit_rate ? `
+                    <div class="stat-item">
+                        <div class="stat-label">Average Hit Rate</div>
+                        <div class="stat-value">${analysis.average_hit_rate}%</div>
+                    </div>
+                    ` : ''}
+                </div>
+            </div>
+        `;
+        
+        // Categories breakdown
+        if (analysis.categories && Object.keys(analysis.categories).length > 0) {
+            html += '<div class="result-card"><h3>Categories</h3>';
+            const sortedCats = Object.entries(analysis.categories)
+                .sort((a, b) => b[1].photos - a[1].photos);
+            sortedCats.forEach(([cat, data]) => {
+                html += `<p><strong>${escapeHtml(cat)}:</strong> ${data.sessions} sessions, ${data.photos.toLocaleString()} photos</p>`;
+            });
+            html += '</div>';
+        }
+        
+        // Groups breakdown
+        if (analysis.groups && Object.keys(analysis.groups).length > 0) {
+            html += '<div class="result-card"><h3>Groups</h3>';
+            const sortedGroups = Object.entries(analysis.groups)
+                .sort((a, b) => b[1].photos - a[1].photos);
+            sortedGroups.forEach(([grp, data]) => {
+                html += `<p><strong>${escapeHtml(grp)}:</strong> ${data.sessions} sessions, ${data.photos.toLocaleString()} photos</p>`;
+            });
+            html += '</div>';
+        }
+        
+        resultsArea.innerHTML = html;
+        return;
+    }
+
+    // Handle specific category/group analysis (original format)
     let html = `
         <h2 style="margin-bottom: 20px;">Analysis Complete</h2>
         <div class="result-card">
@@ -1006,9 +1197,9 @@ function displayAnalysisResults(analysis) {
             <div class="stat-grid">
                 <div class="stat-item">
                     <div class="stat-label">Total Photos</div>
-                    <div class="stat-value">${analysis.total_photos}</div>
+                    <div class="stat-value">${analysis.total_photos || 0}</div>
                 </div>
-                ${analysis.hit_rate ? `
+                ${analysis.hit_rate !== undefined && analysis.hit_rate !== null ? `
                 <div class="stat-item">
                     <div class="stat-label">Hit Rate</div>
                     <div class="stat-value">${analysis.hit_rate.toFixed(1)}%</div>
