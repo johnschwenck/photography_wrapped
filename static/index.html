@@ -66,7 +66,8 @@
                         <div class="form-group">
                             <label for="session-name">Session Name:</label>
                             <input type="text" id="session-name" placeholder="e.g., Modern Alibi - Asheville">
-                            <small>Optional - auto-generated from folder</small>
+                            <small>Optional - auto-generated from folder (prioritizes date patterns)</small>
+                            <small id="auto-session-name-preview" style="display:none; color: var(--accent); font-style: italic;"></small>
                         </div>
 
                         <div class="form-group">
@@ -257,6 +258,7 @@
         </div>
     </div>
 
-    <script src="app.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <script src="app.js?v=20251210i"></script>
 </body>
 </html>

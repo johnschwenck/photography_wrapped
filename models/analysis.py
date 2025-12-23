@@ -171,6 +171,7 @@ class Analysis:
     
     # Frequency distributions
     lens_freq: Counter = field(default_factory=Counter)
+    camera_freq: Counter = field(default_factory=Counter)
     shutter_speed_freq: Counter = field(default_factory=Counter)
     aperture_freq: Counter = field(default_factory=Counter)
     iso_freq: Counter = field(default_factory=Counter)
@@ -178,6 +179,7 @@ class Analysis:
     flash_mode_freq: Counter = field(default_factory=Counter)
     focal_length_freq: Counter = field(default_factory=Counter)
     exposure_bias_freq: Counter = field(default_factory=Counter)
+    time_of_day_freq: Counter = field(default_factory=Counter)
     
     # Detailed breakdowns
     lens_breakdowns: Dict[str, Dict[str, Any]] = field(default_factory=dict)
@@ -200,6 +202,7 @@ class Analysis:
         
         # Merge frequency counters
         self.lens_freq.update(session_stats.get('lens_freq', Counter()))
+        self.camera_freq.update(session_stats.get('camera_freq', Counter()))
         self.shutter_speed_freq.update(session_stats.get('shutter_speed_freq', Counter()))
         self.aperture_freq.update(session_stats.get('aperture_freq', Counter()))
         self.iso_freq.update(session_stats.get('iso_freq', Counter()))
@@ -207,6 +210,7 @@ class Analysis:
         self.flash_mode_freq.update(session_stats.get('flash_mode_freq', Counter()))
         self.focal_length_freq.update(session_stats.get('focal_length_freq', Counter()))
         self.exposure_bias_freq.update(session_stats.get('exposure_bias_freq', Counter()))
+        self.time_of_day_freq.update(session_stats.get('time_of_day_freq', Counter()))
         
         # Merge lens breakdowns
         for lens_name, breakdown in session_stats.get('lens_breakdowns', {}).items():
@@ -251,6 +255,7 @@ class Analysis:
             'total_raw_photos': self.total_raw_photos,
             'hit_rate': self.hit_rate,
             'lens_freq': dict(self.lens_freq),
+            'camera_freq': dict(self.camera_freq),
             'shutter_speed_freq': dict(self.shutter_speed_freq),
             'aperture_freq': dict(self.aperture_freq),
             'iso_freq': dict(self.iso_freq),
@@ -258,6 +263,7 @@ class Analysis:
             'flash_mode_freq': dict(self.flash_mode_freq),
             'focal_length_freq': dict(self.focal_length_freq),
             'exposure_bias_freq': dict(self.exposure_bias_freq),
+            'time_of_day_freq': dict(self.time_of_day_freq),
             'lens_breakdowns': self.lens_breakdowns,
             'prime_count': self.prime_count,
             'zoom_count': self.zoom_count,

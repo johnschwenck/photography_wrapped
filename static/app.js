@@ -49,6 +49,49 @@ function updateProgressBar(percentage, status) {
     }
 }
 
+// Helper function to extract session name from folder path using smart logic
+function extractSessionNameFromPath(folderPath) {
+    if (!folderPath) return '';
+    
+    // Split path and get all parts
+    const parts = folderPath.replace(/\\/g, '/').split('/').filter(p => p.trim());
+    if (parts.length === 0) return '';
+    
+    // Date patterns to look for
+    const datePatterns = [
+        /\d{4}[-_]\d{2}[-_]\d{2}/,  // YYYY-MM-DD or YYYY_MM_DD
+        /\d{2}[-_]\d{2}[-_]\d{4}/,  // MM-DD-YYYY or MM_DD_YYYY
+        /\d{8}/,                      // YYYYMMDD
+        /\d{2}[-_]\d{2}[-_]\d{2}/   // YY-MM-DD or MM-DD-YY
+    ];
+    
+    const genericFolders = ['photos', 'edited', 'raw', 'images', 'jpg', 'jpeg', 'export', 'exported'];
+    
+    let datePatternFolder = null;
+    let nonGenericFolder = null;
+    
+    // Search from right to left (end of path to beginning)
+    for (let i = parts.length - 1; i >= 0; i--) {
+        const part = parts[i];
+        const partLower = part.toLowerCase();
+        
+        // Check if folder has a date pattern
+        const hasDate = datePatterns.some(pattern => pattern.test(part));
+        
+        if (hasDate && !datePatternFolder) {
+            datePatternFolder = part;
+        }
+        
+        if (!genericFolders.includes(partLower) && !nonGenericFolder) {
+            nonGenericFolder = part;
+        }
+    }
+    
+    // Use priority order: date pattern > non-generic > endpoint
+    const sessionName = datePatternFolder || nonGenericFolder || parts[parts.length - 1];
+    return sessionName.replace(/ /g, '_');
+}
+
 // Tab management
 document.addEventListener('DOMContentLoaded', () => {
     // Tab switching
@@ -101,7 +144,36 @@ document.addEventListener('DOMContentLoaded', () => {
     sessionDateInput.style.opacity = '0.5';
     sessionDateInput.style.cursor = 'not-allowed';
 
-
+    // Auto-extract session name preview when folder path changes
+    const folderPathInput = document.getElementById('folder-path');
+    const sessionNameInput = document.getElementById('session-name');
+    const autoPreview = document.getElementById('auto-session-name-preview');
+    
+    folderPathInput.addEventListener('input', () => {
+        if (sessionNameInput.value.trim() === '' && folderPathInput.value.trim()) {
+            const autoName = extractSessionNameFromPath(folderPathInput.value.trim());
+            if (autoName) {
+                autoPreview.textContent = `Auto: ${autoName}`;
+                autoPreview.style.display = 'block';
+            } else {
+                autoPreview.style.display = 'none';
+            }
+        } else {
+            autoPreview.style.display = 'none';
+        }
+    });
+    
+    sessionNameInput.addEventListener('input', () => {
+        if (sessionNameInput.value.trim()) {
+            autoPreview.style.display = 'none';
+        } else if (folderPathInput.value.trim()) {
+            const autoName = extractSessionNameFromPath(folderPathInput.value.trim());
+            if (autoName) {
+                autoPreview.textContent = `Auto: ${autoName}`;
+                autoPreview.style.display = 'block';
+            }
+        }
+    });
 
     // Add to queue
     document.getElementById('add-to-queue-btn').addEventListener('click', addToQueue);
@@ -306,12 +378,175 @@ window.removeFromQueue = function(id) {
     renderQueue();
 }
 
-function addToQueue() {
+// Helper function to check for duplicate sessions
+async function checkForDuplicates(category, group, sessionName = '', sessionDate = null) {
+    console.log('[DUPLICATE CHECK] Starting check:', { category, group, sessionName, sessionDate });
+    try {
+        const response = await fetch('/api/check-duplicates', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ category, group, session_name: sessionName, date: sessionDate })
+        });
+        
+        const data = await response.json();
+        console.log('[DUPLICATE CHECK] API response:', data);
+        
+        if (data.similar_sessions && data.similar_sessions.length > 0) {
+            // Filter duplicates based on date verification:
+            // - If BOTH have dates, they must match (same date = likely duplicate)
+            // - If only one or neither has date, consider as potential duplicate
+            let matches = data.similar_sessions;
+            
+            if (sessionDate) {
+                matches = matches.filter(s => {
+                    // If existing has no date, still flag as potential duplicate
+                    if (!s.date) return true;
+                    // Both have dates - compare them
+                    const existingDate = s.date.split('T')[0];
+                    const inputDate = sessionDate.split('T')[0];
+                    return existingDate === inputDate;
+                });
+            }
+            
+            if (matches.length > 0) {
+                console.log('[DUPLICATE CHECK] Found duplicates after filtering:', matches);
+                return {
+                    hasDuplicates: true,
+                    existing: matches[0], // First match
+                    input: { 
+                        name: data.input_session_name,
+                        category: data.input_category, 
+                        group: data.input_group,
+                        date: sessionDate
+                    }
+                };
+            } else {
+                console.log('[DUPLICATE CHECK] No matches after date filtering');
+            }
+        }
+        
+        console.log('[DUPLICATE CHECK] No duplicates found');
+        return { hasDuplicates: false };
+    } catch (error) {
+        console.error('[DUPLICATE CHECK] Error:', error);
+        return { hasDuplicates: false };
+    }
+}
+// Helper function to show duplicate resolution dialog
+async function showDuplicateResolutionDialog(existing, input) {
+    return new Promise((resolve) => {
+        const existingStr = `"${existing.category}" / "${existing.group}" / "${existing.name}"`;
+        const inputStr = `"${input.category}" / "${input.group}" / "${input.name}"`;
+        
+        // Check if it's an exact match
+        const isExactMatch = existing.category === input.category && 
+                            existing.group === input.group &&
+                            existing.name === input.name;
+        
+        // Add match percentage if available
+        let matchInfo = '';
+        if (existing.match_percentage !== undefined) {
+            matchInfo = `\nMatch: ${existing.match_percentage}%`;
+        }
+        
+        // Add additional details
+        let detailsInfo = '';
+        if (existing.total_photos) {
+            detailsInfo += `\nPhotos: ${existing.total_photos}`;
+            if (existing.hit_rate) {
+                detailsInfo += ` | Hit Rate: ${existing.hit_rate.toFixed(1)}%`;
+            }
+        }
+        
+        // Add date info if available
+        let dateInfo = '';
+        if (existing.date || input.date) {
+            const existingDate = existing.date ? existing.date.split('T')[0] : 'Not set';
+            const inputDate = input.date ? input.date.split('T')[0] : 'Not set';
+            const existingSource = existing.date_detected ? ` (${existing.date_detected})` : '';
+            dateInfo = `\nExisting date: ${existingDate}${existingSource}\n` +
+                      `Your date: ${inputDate}`;
+        }
+        
+        let message;
+        if (isExactMatch) {
+            message = `⚠️ DUPLICATE SESSION FOUND\n\n` +
+                `This session already exists in the database:\n` +
+                `${existingStr}${matchInfo}${detailsInfo}\n` +
+                dateInfo +
+                `\n\nThis will create a duplicate entry.\n\n` +
+                `Choose an option:\n` +
+                `1 = Continue (allow duplicate)\n` +
+                `0 = Cancel`;
+        } else {
+            message = `⚠️ SIMILAR SESSION FOUND\n\n` +
+                `Existing in database: ${existingStr}${matchInfo}${detailsInfo}\n` +
+                `Your input: ${inputStr}\n` +
+                dateInfo +
+                `\n\nThese sessions may be related.\n\n` +
+                `Choose an option:\n` +
+                `1 = Use YOUR input and update database\n` +
+                `2 = Use EXISTING from database\n` +
+                `3 = Keep both separate\n` +
+                `0 = Cancel`;
+        }
+        
+        const choice = prompt(message);
+        
+        if (isExactMatch) {
+            if (choice === '1') {
+                resolve('keep_separate');
+            } else {
+                resolve('cancel');
+            }
+        } else {
+            if (choice === '1') {
+                resolve('rename_existing');
+            } else if (choice === '2') {
+                resolve('use_existing');
+            } else if (choice === '3') {
+                resolve('keep_separate');
+            } else {
+                resolve('cancel');
+            }
+        }
+    });
+}
+
+// Helper function to rename existing sessions
+async function renameExistingSessions(oldCategory, oldGroup, newCategory, newGroup) {
+    try {
+        const response = await fetch('/api/database/rename-sessions', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                old_category: oldCategory,
+                old_group: oldGroup,
+                new_category: newCategory,
+                new_group: newGroup
+            })
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            console.log(`Renamed ${data.updated_sessions} sessions`);
+            alert(`✓ Updated ${data.updated_sessions} existing session(s) to use "${newCategory}" / "${newGroup}"`);
+        } else {
+            alert('Error renaming sessions: ' + (data.error || 'Unknown error'));
+        }
+    } catch (error) {
+        console.error('Error renaming sessions:', error);
+        alert('Error renaming sessions: ' + error.message);
+    }
+}
+
+async function addToQueue() {
     console.log('addToQueue function called');
     
     const mode = document.getElementById('mode-select').value;
     const folderPath = document.getElementById('folder-path').value.trim();
-    const sessionName = document.getElementById('session-name').value.trim();
+    let sessionName = document.getElementById('session-name').value.trim();
     const sessionDate = document.getElementById('session-date').value.trim();
     const useDateHeuristics = document.getElementById('use-date-heuristics').checked;
     const useFilenameDates = document.getElementById('use-filename-dates').checked;
@@ -319,7 +554,13 @@ function addToQueue() {
     const group = document.getElementById('group').value.trim();
     const calculateHitRate = document.getElementById('calculate-hit-rate').checked;
 
-    console.log('Adding to queue:', { mode, folderPath, category, group });
+    // If session name is empty, auto-extract from path
+    if (!sessionName && folderPath) {
+        sessionName = extractSessionNameFromPath(folderPath);
+        console.log('Auto-extracted session name:', sessionName);
+    }
+
+    console.log('Adding to queue:', { mode, folderPath, category, group, sessionName });
 
     if (!folderPath) {
         alert('Please enter a folder path');
@@ -343,6 +584,42 @@ function addToQueue() {
         return;
     }
 
+    // Check for duplicates before adding to queue (include session name and date for verification)
+    console.log('[ADD TO QUEUE] Checking for duplicates...');
+    const duplicateCheckResult = await checkForDuplicates(category, group, sessionName, sessionDate || null);
+    console.log('[ADD TO QUEUE] Duplicate check result:', duplicateCheckResult);
+    
+    if (duplicateCheckResult && duplicateCheckResult.hasDuplicates) {
+        console.log('[ADD TO QUEUE] Duplicates found, showing dialog...');
+        // Show resolution dialog and wait for user choice
+        const resolution = await showDuplicateResolutionDialog(
+            duplicateCheckResult.existing,
+            duplicateCheckResult.input
+        );
+        console.log('[ADD TO QUEUE] User resolution:', resolution);
+        
+        if (resolution === 'cancel') {
+            return; // User cancelled
+        } else if (resolution === 'rename_existing') {
+            // Rename all existing sessions to match new input
+            await renameExistingSessions(
+                duplicateCheckResult.existing.category,
+                duplicateCheckResult.existing.group,
+                category,
+                group
+            );
+        } else if (resolution === 'use_existing') {
+            // Update form to use existing names
+            document.getElementById('category').value = duplicateCheckResult.existing.category;
+            document.getElementById('group').value = duplicateCheckResult.existing.group;
+        }
+        // If 'keep_separate', continue with original values
+    }
+
+    // Re-read category and group after potential duplicate resolution
+    const finalCategory = document.getElementById('category').value.trim();
+    const finalGroup = document.getElementById('group').value.trim();
+
     const queueItem = {
         id: Date.now(),
         mode: mode,
@@ -351,8 +628,8 @@ function addToQueue() {
         sessionDate: sessionDate,
         useDateHeuristics: useDateHeuristics,
         useFilenameDates: useFilenameDates,
-        category: category,
-        group: group,
+        category: finalCategory,
+        group: finalGroup,
         calculateHitRate: calculateHitRate,
         targetFolder: targetFolder
     };
@@ -1014,9 +1291,10 @@ function displayQueueResults(results, successCount, failCount) {
 async function extractMetadata() {
     const mode = document.getElementById('mode-select').value;
     const folderPath = document.getElementById('folder-path').value.trim();
-    const sessionName = document.getElementById('session-name').value.trim();
+    let sessionName = document.getElementById('session-name').value.trim();
     const sessionDate = document.getElementById('session-date').value.trim();
     const useDateHeuristics = document.getElementById('use-date-heuristics').checked;
+    const useFilenameDates = document.getElementById('use-filename-dates').checked;
     const category = document.getElementById('category').value.trim();
     const group = document.getElementById('group').value.trim();
     const calculateHitRate = document.getElementById('calculate-hit-rate').checked;
@@ -1036,6 +1314,43 @@ async function extractMetadata() {
         return;
     }
 
+    // If session name is empty, auto-extract from path
+    if (!sessionName && folderPath) {
+        sessionName = extractSessionNameFromPath(folderPath);
+        console.log('Auto-extracted session name:', sessionName);
+    }
+
+    // Check for duplicates before extraction (include session name and date for verification)
+    const duplicateCheckResult = await checkForDuplicates(category, group, sessionName, sessionDate || null);
+    if (duplicateCheckResult && duplicateCheckResult.hasDuplicates) {
+        // Show resolution dialog and wait for user choice
+        const resolution = await showDuplicateResolutionDialog(
+            duplicateCheckResult.existing,
+            duplicateCheckResult.input
+        );
+        
+        if (resolution === 'cancel') {
+            return; // User cancelled
+        } else if (resolution === 'rename_existing') {
+            // Rename all existing sessions to match new input
+            await renameExistingSessions(
+                duplicateCheckResult.existing.category,
+                duplicateCheckResult.existing.group,
+                category,
+                group
+            );
+        } else if (resolution === 'use_existing') {
+            // Update form and variables to use existing names
+            document.getElementById('category').value = duplicateCheckResult.existing.category;
+            document.getElementById('group').value = duplicateCheckResult.existing.group;
+        }
+        // If 'keep_separate', continue with original values
+    }
+
+    // Re-read category and group after potential duplicate resolution
+    const finalCategory = document.getElementById('category').value.trim();
+    const finalGroup = document.getElementById('group').value.trim();
+
     const resultsArea = document.getElementById('extract-results');
     resultsArea.classList.add('visible');
     resultsArea.innerHTML = '<div class="loading">Processing</div>';
@@ -1053,8 +1368,8 @@ async function extractMetadata() {
                     date_str: sessionDate,
                     use_date_heuristics: useDateHeuristics,
                     use_filename_dates: useFilenameDates,
-                    category: category,
-                    group: group,
+                    category: finalCategory,
+                    group: finalGroup,
                     calculate_hit_rate: calculateHitRate
                 })
             });
@@ -1073,8 +1388,8 @@ async function extractMetadata() {
                     date_str: sessionDate,
                     use_date_heuristics: useDateHeuristics,
                     use_filename_dates: useFilenameDates,
-                    category: category,
-                    group: group,
+                    category: finalCategory,
+                    group: finalGroup,
                     calculate_hit_rate: calculateHitRate
                 })
             });
@@ -1126,7 +1441,8 @@ function displaySingleExtractResult(data) {
                 </div>
                 ` : ''}
             </div>
-            <p style="margin-top: 15px;"><strong>Category:</strong> ${session.category}</p>
+            <p style="margin-top: 15px;"><strong>Session Name:</strong> ${session.name}</p>
+            <p><strong>Category:</strong> ${session.category}</p>
             <p><strong>Group:</strong> ${session.group}</p>
             ${session.date ? `<p><strong>Date:</strong> ${session.date} <span style="color: var(--success);">(${session.date_detected || 'provided'})</span></p>` : `<p><strong>Date:</strong> <span style="color: var(--error);">Not found</span></p>`}
             ${session.date_detected && session.date_detected.startsWith('filename') ? `<p style="color: var(--warning); font-size: 0.9em; margin-top: 10px;">💡 Date extracted from filenames. You can adjust this in the Database tab if needed.</p>` : ''}
@@ -1253,120 +1569,482 @@ async function analyzeData() {
     }
 }
 
+// Helper function to create histogram charts
+let chartInstances = [];
+let currentAnalysisData = null; // Store the full analysis data
+let activeFilters = {}; // Store active filters { filterType: value }
+let activeLensType = 'all'; // Track lens type filter: 'all', 'prime', or 'zoom'
+
+function createHistogramChart(canvasId, labels, data, chartTitle, xAxisLabel, color, filterType, rawValues) {
+    // Destroy existing chart if it exists
+    const existingChart = chartInstances.find(c => c && c.canvas && c.canvas.id === canvasId);
+    if (existingChart) {
+        existingChart.destroy();
+        chartInstances = chartInstances.filter(c => c && c.canvas && c.canvas.id !== canvasId);
+    }
+    
+    const canvas = document.getElementById(canvasId);
+    if (!canvas) {
+        console.warn(`Canvas not found: ${canvasId}`);
+        return;
+    }
+    
+    const ctx = canvas.getContext('2d');
+    
+    // Calculate total for percentages
+    const total = data.reduce((sum, val) => sum + val, 0);
+    
+    // Use consistent color for entire chart (unless color is an array for grouped data)
+    const backgroundColor = Array.isArray(color) ? color : data.map(() => color);
+    const borderColor = Array.isArray(color) 
+        ? color.map(c => c.replace('0.8', '1'))
+        : data.map(() => color.replace('0.8', '1'));
+    
+    const chart = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: labels,
+            datasets: [{
+                label: 'Photos',
+                data: data,
+                backgroundColor: backgroundColor,
+                borderColor: borderColor,
+                borderWidth: 1
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            layout: {
+                padding: {
+                    bottom: 30  // Extra padding at bottom for rotated labels
+                }
+            },
+            plugins: {
+                title: {
+                    display: true,
+                    text: chartTitle,
+                    color: '#e5e7eb',
+                    font: {
+                        size: 14,
+                        weight: 'bold'
+                    },
+                    padding: {
+                        top: 10,
+                        bottom: 15
+                    }
+                },
+                legend: {
+                    display: false
+                },
+                tooltip: {
+                    backgroundColor: 'rgba(17, 24, 39, 0.95)',
+                    titleColor: '#e5e7eb',
+                    bodyColor: '#e5e7eb',
+                    borderColor: '#4b5563',
+                    borderWidth: 1,
+                    padding: 10,
+                    displayColors: false,
+                    callbacks: {
+                        label: function(context) {
+                            const count = context.parsed.y;
+                            const percentage = ((count / total) * 100).toFixed(1);
+                            return `Photos: ${count} (${percentage}%)`;
+                        }
+                    }
+                }
+            },
+            scales: {
+                y: {
+                    beginAtZero: true,
+                    title: {
+                        display: true,
+                        text: 'Freq',
+                        color: '#9ca3af',
+                        font: {
+                            size: 12,
+                            weight: 'bold'
+                        }
+                    },
+                    grid: {
+                        color: 'rgba(75, 85, 99, 0.2)',
+                        drawBorder: false
+                    },
+                    ticks: {
+                        color: '#9ca3af',
+                        font: {
+                            size: 11
+                        }
+                    }
+                },
+                x: {
+                    title: {
+                        display: true,
+                        text: xAxisLabel,
+                        color: '#9ca3af',
+                        font: {
+                            size: 12,
+                            weight: 'bold'
+                        },
+                        padding: {
+                            top: 20  // Add space between x-axis labels and title
+                        }
+                    },
+                    grid: {
+                        display: false
+                    },
+                    ticks: {
+                        color: '#9ca3af',
+                        font: {
+                            size: 11
+                        },
+                        maxRotation: 45,
+                        minRotation: 45
+                    }
+                }
+            }
+        }
+    });
+    
+    // Add double-click handler to canvas for filtering
+    let clickTimeout = null;
+    let clickCount = 0;
+    
+    canvas.onclick = (event) => {
+        clickCount++;
+        
+        if (clickCount === 1) {
+            clickTimeout = setTimeout(() => {
+                // Single click - do nothing
+                clickCount = 0;
+            }, 300);
+        } else if (clickCount === 2) {
+            // Double click - apply filter
+            clearTimeout(clickTimeout);
+            clickCount = 0;
+            
+            // Skip filtering if no filterType specified (e.g., bucketed zoom ranges)
+            if (!filterType) {
+                console.log('Filtering disabled for this chart');
+                return;
+            }
+            
+            // Try to find a clicked bar first
+            const points = chart.getElementsAtEventForMode(event, 'nearest', { intersect: true }, true);
+            
+            let clickedIndex = -1;
+            
+            if (points.length > 0) {
+                // Clicked on a bar
+                clickedIndex = points[0].index;
+            } else {
+                // Check if clicked on x-axis label area
+                const rect = canvas.getBoundingClientRect();
+                const x = event.clientX - rect.left;
+                const y = event.clientY - rect.top;
+                
+                // Get chart area dimensions
+                const chartArea = chart.chartArea;
+                const xScale = chart.scales.x;
+                
+                // Check if click is in the x-axis label area (below the chart)
+                if (y > chartArea.bottom && y < canvas.height) {
+                    // Find which label was clicked based on x position
+                    const labelPositions = xScale.ticks.map((tick, i) => ({
+                        index: i,
+                        x: xScale.getPixelForTick(i)
+                    }));
+                    
+                    // Find closest label
+                    let closestLabel = null;
+                    let minDistance = Infinity;
+                    
+                    labelPositions.forEach(pos => {
+                        const distance = Math.abs(x - pos.x);
+                        if (distance < minDistance && distance < 50) { // Within 50px
+                            minDistance = distance;
+                            closestLabel = pos;
+                        }
+                    });
+                    
+                    if (closestLabel !== null) {
+                        clickedIndex = closestLabel.index;
+                        console.log('Clicked on x-axis label at index:', clickedIndex);
+                    }
+                }
+            }
+            
+            if (clickedIndex >= 0) {
+                const clickedValue = rawValues[clickedIndex];
+                
+                console.log('Double-clicked on:', filterType, '=', clickedValue);
+                console.log('Current filters before toggle:', {...activeFilters});
+                
+                // Toggle filter: if already active, remove it; otherwise set it
+                if (activeFilters[filterType] === clickedValue) {
+                    delete activeFilters[filterType];
+                    console.log('Filter removed');
+                } else {
+                    activeFilters[filterType] = clickedValue;
+                    console.log('Filter added');
+                }
+                
+                console.log('Active filters after toggle:', {...activeFilters});
+                
+                // Re-render with filtered data
+                applyFiltersAndRedraw();
+            }
+        }
+    };
+    
+    chartInstances.push(chart);
+}
+
+// Apply active filters and redraw all charts
+async function applyFiltersAndRedraw() {
+    if (!currentAnalysisData) return;
+    
+    // If no filters, just redraw with original data
+    if (Object.keys(activeFilters).length === 0) {
+        displayActiveFilters(); // Clear filter badges
+        displayAnalysisResults(currentAnalysisData);
+        return;
+    }
+    
+    // Show active filters to user
+    displayActiveFilters();
+    
+    // Fetch filtered data from backend
+    const categoryFilter = document.getElementById('analysis-category-filter');
+    const groupFilter = document.getElementById('analysis-group-filter');
+    const sessionFilter = document.getElementById('analysis-session-filter');
+    
+    const category = categoryFilter ? categoryFilter.value || null : null;
+    const group = groupFilter ? groupFilter.value || null : null;
+    let sessions = null;
+    if (group && sessionFilter && sessionFilter.options.length > 0) {
+        const selected = Array.from(sessionFilter.selectedOptions).map(opt => opt.value);
+        if (selected.length > 0) {
+            sessions = selected;
+        }
+    }
+    
+    try {
+        const response = await fetch(`${API_BASE}/analyze/database`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ 
+                category, 
+                group, 
+                sessions,
+                filters: activeFilters // Send active filters to backend
+            })
+        });
+        
+        console.log('Filter request sent:', { category, group, sessions, filters: activeFilters });
+        
+        const data = await response.json();
+        
+        console.log('Filtered analysis response:', data);
+        
+        if (response.ok && data.analysis) {
+            // Don't update currentAnalysisData - keep original for when filters are cleared
+            displayAnalysisResults(data.analysis);
+        } else {
+            console.error('Filter request failed:', data);
+            showError('analyze-results', data.error || 'Failed to apply filters');
+        }
+    } catch (error) {
+        console.error('Error applying filters:', error);
+        showError('analyze-results', `Error: ${error.message}`);
+    }
+}
+
+// Display active filters as badges
+function displayActiveFilters() {
+    const resultsArea = document.getElementById('analyze-results');
+    let filterBadges = '';
+    
+    if (Object.keys(activeFilters).length > 0) {
+        filterBadges = '<div style="margin-bottom: 15px; padding: 10px; background: rgba(59, 130, 246, 0.1); border-radius: 8px; border-left: 3px solid rgba(59, 130, 246, 0.8);">';
+        filterBadges += '<strong style="color: #e5e7eb;">Active Filters:</strong> ';
+        
+        const filterLabels = {
+            'camera': 'Camera',
+            'lens': 'Lens',
+            'aperture': 'Aperture',
+            'shutter_speed': 'Shutter Speed',
+            'iso': 'ISO',
+            'focal_length': 'Focal Length',
+            'time_of_day': 'Time of Day'
+        };
+        
+        const badges = Object.entries(activeFilters).map(([type, value]) => {
+            const label = filterLabels[type] || type;
+            return `<span style="display: inline-block; margin: 5px; padding: 5px 10px; background: rgba(59, 130, 246, 0.8); color: white; border-radius: 15px; font-size: 0.9em;">
+                ${label}: ${value} 
+                <button onclick="removeFilter('${type}')" style="background: none; border: none; color: white; cursor: pointer; font-weight: bold; margin-left: 5px;">×</button>
+            </span>`;
+        }).join('');
+        
+        filterBadges += badges;
+        filterBadges += '<button onclick="clearAllFilters()" style="margin-left: 10px; padding: 5px 10px; background: rgba(239, 68, 68, 0.8); color: white; border: none; border-radius: 5px; cursor: pointer; font-size: 0.9em;">Clear All</button>';
+        filterBadges += '</div>';
+        
+        // Insert filter badges at the top of results
+        const existingBadges = resultsArea.querySelector('.filter-badges');
+        if (existingBadges) {
+            existingBadges.remove();
+        }
+        resultsArea.insertAdjacentHTML('afterbegin', `<div class="filter-badges">${filterBadges}</div>`);
+    } else {
+        const existingBadges = resultsArea.querySelector('.filter-badges');
+        if (existingBadges) {
+            existingBadges.remove();
+        }
+    }
+}
+
+// Remove a specific filter
+window.removeFilter = function(filterType) {
+    delete activeFilters[filterType];
+    applyFiltersAndRedraw();
+}
+
+// Clear all filters
+window.clearAllFilters = function() {
+    activeFilters = {};
+    activeLensType = 'all';
+    
+    // Reset lens type buttons if they exist
+    const allBtn = document.getElementById('btn-all');
+    const primeBtn = document.getElementById('btn-prime');
+    const zoomBtn = document.getElementById('btn-zoom');
+    
+    if (allBtn) {
+        allBtn.style.background = 'rgba(59, 130, 246, 0.8)';
+        allBtn.style.color = 'white';
+    }
+    if (primeBtn) {
+        primeBtn.style.background = 'rgba(75, 85, 99, 0.5)';
+        primeBtn.style.color = '#9ca3af';
+    }
+    if (zoomBtn) {
+        zoomBtn.style.background = 'rgba(75, 85, 99, 0.5)';
+        zoomBtn.style.color = '#9ca3af';
+    }
+    
+    applyFiltersAndRedraw();
+}
+
+// Toggle lens type filter
+window.toggleLensType = function(type) {
+    console.log('toggleLensType called with:', type);
+    console.log('activeFilters before:', {...activeFilters});
+    
+    activeLensType = type;
+    
+    // Update button styles
+    const allBtn = document.getElementById('btn-all');
+    const primeBtn = document.getElementById('btn-prime');
+    const zoomBtn = document.getElementById('btn-zoom');
+    
+    console.log('Buttons found:', { allBtn: !!allBtn, primeBtn: !!primeBtn, zoomBtn: !!zoomBtn });
+    
+    // Reset all buttons to inactive state
+    if (allBtn) {
+        allBtn.style.background = 'rgba(75, 85, 99, 0.5)';
+        allBtn.style.color = '#9ca3af';
+    }
+    if (primeBtn) {
+        primeBtn.style.background = 'rgba(75, 85, 99, 0.5)';
+        primeBtn.style.color = '#9ca3af';
+    }
+    if (zoomBtn) {
+        zoomBtn.style.background = 'rgba(75, 85, 99, 0.5)';
+        zoomBtn.style.color = '#9ca3af';
+    }
+    
+    // Highlight active button and set filter
+    if (type === 'all') {
+        if (allBtn) {
+            allBtn.style.background = 'rgba(59, 130, 246, 0.8)';
+            allBtn.style.color = 'white';
+        }
+        // Remove lens_type filter
+        delete activeFilters.lens_type;
+    } else if (type === 'prime') {
+        if (primeBtn) {
+            primeBtn.style.background = 'rgba(236, 72, 153, 0.8)';
+            primeBtn.style.color = 'white';
+        }
+        // Add lens_type filter
+        activeFilters.lens_type = 'prime';
+    } else if (type === 'zoom') {
+        if (zoomBtn) {
+            zoomBtn.style.background = 'rgba(139, 92, 246, 0.8)';
+            zoomBtn.style.color = 'white';
+        }
+        // Add lens_type filter
+        activeFilters.lens_type = 'zoom';
+    }
+    
+    console.log('activeFilters after:', {...activeFilters});
+    
+    applyFiltersAndRedraw();
+}
+
 function displayAnalysisResults(analysis) {
     const resultsArea = document.getElementById('analyze-results');
     resultsArea.classList.add('visible');
+    
+    // Store analysis data for filtering (only if not already stored)
+    if (!currentAnalysisData || Object.keys(activeFilters).length === 0) {
+        currentAnalysisData = analysis;
+    }
+    
+    // Display active filters if any
+    displayActiveFilters();
 
     // Debug logging
     console.log('displayAnalysisResults called with:', analysis);
     console.log('analysis.scope:', analysis.scope);
     console.log('analysis.total_photos:', analysis.total_photos);
     console.log('analysis.lens_freq:', analysis.lens_freq);
+    console.log('analysis.camera_freq:', analysis.camera_freq);
+    console.log('Has filters?', Object.keys(activeFilters).length > 0);
 
-    // Handle sessions-specific analysis
-    if (analysis.scope === 'sessions') {
-        let html = `
-            <h2 style="margin-bottom: 20px;">Selected Sessions Analysis</h2>
-            <div class="result-card">
-                <h3>Overview</h3>
-                <div class="stat-grid">
-                    <div class="stat-item">
-                        <div class="stat-label">Sessions Analyzed</div>
-                        <div class="stat-value">${analysis.total_sessions}</div>
-                    </div>
-                    <div class="stat-item">
-                        <div class="stat-label">Total Photos</div>
-                        <div class="stat-value">${analysis.total_photos.toLocaleString()}</div>
-                    </div>
-                    <div class="stat-item">
-                        <div class="stat-label">RAW Photos</div>
-                        <div class="stat-value">${analysis.total_raw_photos.toLocaleString()}</div>
-                    </div>
-                    ${analysis.average_hit_rate ? `
-                    <div class="stat-item">
-                        <div class="stat-label">Average Hit Rate</div>
-                        <div class="stat-value">${analysis.average_hit_rate}%</div>
-                    </div>
-                    ` : ''}
-                </div>
-            </div>
-        `;
-        
-        // List sessions
-        if (analysis.sessions && analysis.sessions.length > 0) {
-            html += '<div class="result-card"><h3>Sessions</h3>';
-            analysis.sessions.forEach(session => {
-                html += `<p><strong>${escapeHtml(session.name)}:</strong> ${session.total_photos} photos`;
-                if (session.hit_rate) html += ` (${session.hit_rate}% hit rate)`;
-                html += `</p>`;
-            });
-            html += '</div>';
-        }
-        
-        resultsArea.innerHTML = html;
-        return;
+    // Determine the title based on query parameters
+    let mainTitle = 'Analysis Complete';
+    if (analysis.query_category && !analysis.query_group) {
+        mainTitle = `${analysis.query_category.charAt(0).toUpperCase() + analysis.query_category.slice(1)} - All Groups`;
+    } else if (analysis.query_group && !analysis.query_category) {
+        mainTitle = analysis.query_group;
+    } else if (analysis.query_category && analysis.query_group) {
+        mainTitle = `${analysis.query_category.charAt(0).toUpperCase() + analysis.query_category.slice(1)} - ${analysis.query_group}`;
+    } else if (!analysis.query_category && !analysis.query_group) {
+        mainTitle = 'All Data';
     }
 
-    // Handle database-wide analysis (different structure)
-    if (analysis.scope === 'database') {
-        let html = `
-            <h2 style="margin-bottom: 20px;">Database Analysis</h2>
-            <div class="result-card">
-                <h3>Overview</h3>
-                <div class="stat-grid">
-                    <div class="stat-item">
-                        <div class="stat-label">Total Sessions</div>
-                        <div class="stat-value">${analysis.total_sessions}</div>
-                    </div>
-                    <div class="stat-item">
-                        <div class="stat-label">Total Photos</div>
-                        <div class="stat-value">${analysis.total_photos.toLocaleString()}</div>
-                    </div>
-                    <div class="stat-item">
-                        <div class="stat-label">RAW Photos</div>
-                        <div class="stat-value">${analysis.total_raw_photos.toLocaleString()}</div>
-                    </div>
-                    ${analysis.average_hit_rate ? `
-                    <div class="stat-item">
-                        <div class="stat-label">Average Hit Rate</div>
-                        <div class="stat-value">${analysis.average_hit_rate}%</div>
-                    </div>
-                    ` : ''}
-                </div>
-            </div>
-        `;
-        
-        // Categories breakdown
-        if (analysis.categories && Object.keys(analysis.categories).length > 0) {
-            html += '<div class="result-card"><h3>Categories</h3>';
-            const sortedCats = Object.entries(analysis.categories)
-                .sort((a, b) => b[1].photos - a[1].photos);
-            sortedCats.forEach(([cat, data]) => {
-                html += `<p><strong>${escapeHtml(cat)}:</strong> ${data.sessions} sessions, ${data.photos.toLocaleString()} photos</p>`;
-            });
-            html += '</div>';
-        }
-        
-        // Groups breakdown
-        if (analysis.groups && Object.keys(analysis.groups).length > 0) {
-            html += '<div class="result-card"><h3>Groups</h3>';
-            const sortedGroups = Object.entries(analysis.groups)
-                .sort((a, b) => b[1].photos - a[1].photos);
-            sortedGroups.forEach(([grp, data]) => {
-                html += `<p><strong>${escapeHtml(grp)}:</strong> ${data.sessions} sessions, ${data.photos.toLocaleString()} photos</p>`;
-            });
-            html += '</div>';
-        }
-        
-        resultsArea.innerHTML = html;
-        return;
-    }
-
-    // Handle specific category/group analysis (original format)
+    // Remove old scope-specific handling - treat all analysis the same way
     let html = `
-        <h2 style="margin-bottom: 20px;">Analysis Complete</h2>
+        <h2 style="margin-bottom: 20px;">${mainTitle}</h2>
+    `;
+    
+    // Add clear filters button if filters are active
+    if (Object.keys(activeFilters).length > 0) {
+        html += `
+            <div style="margin-bottom: 15px;">
+                <button onclick="clearAllFilters()" style="padding: 10px 20px; background: rgba(239, 68, 68, 0.8); color: white; border: none; border-radius: 5px; cursor: pointer; font-size: 1em; font-weight: bold;">
+                    Reset Filters
+                </button>
+            </div>
+        `;
+    }
+    
+    html += `
         <div class="result-card">
-            <h3>${analysis.name || 'Analysis Results'}</h3>
+            <h3>Overview${analysis.query_category ? ' - ' + analysis.query_category.charAt(0).toUpperCase() + analysis.query_category.slice(1) : ''}</h3>
             <div class="stat-grid">
                 <div class="stat-item">
                     <div class="stat-label">Total Photos</div>
@@ -1391,10 +2069,35 @@ function displayAnalysisResults(analysis) {
             </div>
         </div>
     `;
+    
+    // Show categories breakdown for "All Data" view
+    if (!analysis.query_category && !analysis.query_group && analysis.metadata && analysis.metadata.categories) {
+        html += '<div class="result-card"><h3>Categories</h3>';
+        html += '<div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 10px;">';
+        const sortedCats = Object.entries(analysis.metadata.categories)
+            .sort((a, b) => b[1].photos - a[1].photos);
+        sortedCats.forEach(([cat, data]) => {
+            html += `<p style="margin: 0;"><strong>${escapeHtml(cat)}:</strong> ${data.sessions} sessions, ${data.photos.toLocaleString()} photos</p>`;
+        });
+        html += '</div></div>';
+    }
+    
+    // Show groups breakdown for category selection or "All Data" view
+    if (analysis.metadata && analysis.metadata.groups) {
+        html += '<div class="result-card"><h3>Groups</h3>';
+        html += '<div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 10px;">';
+        const sortedGroups = Object.entries(analysis.metadata.groups)
+            .sort((a, b) => b[1].photos - a[1].photos);
+        sortedGroups.forEach(([grp, data]) => {
+            html += `<p style="margin: 0;"><strong>${escapeHtml(grp)}:</strong> ${data.sessions} sessions, ${data.photos.toLocaleString()} photos</p>`;
+        });
+        html += '</div></div>';
+    }
 
     // Camera Bodies
     if (analysis.camera_freq && Object.keys(analysis.camera_freq).length > 0) {
-        html += '<div class="result-card"><h3>Camera Bodies</h3>';
+        const chartId = 'chart-cameras';
+        html += `<div class="result-card"><h3>Camera Bodies</h3><div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; align-items: start;"><div>`;
         const cameras = Object.entries(analysis.camera_freq)
             .sort((a, b) => b[1] - a[1]);
         
@@ -1402,82 +2105,149 @@ function displayAnalysisResults(analysis) {
             const percentage = ((count / analysis.total_photos) * 100).toFixed(1);
             html += `<p><strong>${camera}:</strong> ${count} photos (${percentage}%)</p>`;
         });
-        html += '</div>';
+        html += `</div><div><canvas id="${chartId}" style="height: 350px;"></canvas></div></div></div>`;
     }
 
-    // Top lenses
+    // All lenses
     if (analysis.lens_freq && Object.keys(analysis.lens_freq).length > 0) {
-        html += '<div class="result-card"><h3>Top Lenses</h3>';
+        const chartId = 'chart-lenses';
+        html += `<div class="result-card">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                <h3 style="margin: 0;">All Lenses</h3>
+                <div style="display: flex; gap: 5px; background: rgba(55, 65, 81, 0.5); border-radius: 5px; padding: 3px;">
+                    <button id="btn-all" onclick="toggleLensType('all')" style="padding: 8px 16px; background: rgba(59, 130, 246, 0.8); color: white; border: none; border-radius: 3px; cursor: pointer; font-size: 0.9em; font-weight: bold;">All</button>
+                    <button id="btn-prime" onclick="toggleLensType('prime')" style="padding: 8px 16px; background: rgba(75, 85, 99, 0.5); color: #9ca3af; border: none; border-radius: 3px; cursor: pointer; font-size: 0.9em; font-weight: bold;">Prime</button>
+                    <button id="btn-zoom" onclick="toggleLensType('zoom')" style="padding: 8px 16px; background: rgba(75, 85, 99, 0.5); color: #9ca3af; border: none; border-radius: 3px; cursor: pointer; font-size: 0.9em; font-weight: bold;">Zoom</button>
+                </div>
+            </div>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; align-items: start;"><div>`;
         const lenses = Object.entries(analysis.lens_freq)
-            .sort((a, b) => b[1] - a[1])
-            .slice(0, 10);
+            .sort((a, b) => a[0].localeCompare(b[0])); // Alphabetical order
         
         lenses.forEach(([lens, count]) => {
             const percentage = ((count / analysis.total_photos) * 100).toFixed(1);
             html += `<p><strong>${lens}:</strong> ${count} photos (${percentage}%)</p>`;
         });
-        html += '</div>';
+        html += `</div><div><canvas id="${chartId}" style="height: 350px;"></canvas></div></div></div>`;
     }
 
     // Aperture Stats
     if (analysis.aperture_freq && Object.keys(analysis.aperture_freq).length > 0) {
-        html += '<div class="result-card"><h3>Aperture Settings</h3>';
+        const chartId = 'chart-apertures';
+        html += `<div class="result-card"><h3>Aperture Settings</h3><div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; align-items: start;"><div>`;
         const apertures = Object.entries(analysis.aperture_freq)
-            .sort((a, b) => b[1] - a[1])
-            .slice(0, 10);
+            .sort((a, b) => {
+                const aNum = parseFloat(a[0]);
+                const bNum = parseFloat(b[0]);
+                return aNum - bNum; // Ascending order (smallest to largest)
+            });
         
         apertures.forEach(([aperture, count]) => {
             const percentage = ((count / analysis.total_photos) * 100).toFixed(1);
             html += `<p><strong>f/${aperture}:</strong> ${count} photos (${percentage}%)</p>`;
         });
-        html += '</div>';
+        html += `</div><div><canvas id="${chartId}" style="height: 350px;"></canvas></div></div></div>`;
     }
 
     // Shutter Speed Stats
     if (analysis.shutter_speed_freq && Object.keys(analysis.shutter_speed_freq).length > 0) {
-        html += '<div class="result-card"><h3>Shutter Speeds</h3>';
+        const chartId = 'chart-shutters';
+        html += `<div class="result-card"><h3>Shutter Speeds</h3><div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; align-items: start;"><div>`;
+        const parseShutterSpeed = (speed) => {
+            if (speed.includes('/')) {
+                const [num, denom] = speed.split('/').map(Number);
+                return num / denom;
+            }
+            return parseFloat(speed);
+        };
         const shutters = Object.entries(analysis.shutter_speed_freq)
-            .sort((a, b) => b[1] - a[1])
-            .slice(0, 10);
+            .sort((a, b) => parseShutterSpeed(a[0]) - parseShutterSpeed(b[0])); // Ascending order
         
         shutters.forEach(([shutter, count]) => {
             const percentage = ((count / analysis.total_photos) * 100).toFixed(1);
             html += `<p><strong>${shutter}s:</strong> ${count} photos (${percentage}%)</p>`;
         });
-        html += '</div>';
+        html += `</div><div><canvas id="${chartId}" style="height: 350px;"></canvas></div></div></div>`;
     }
 
     // ISO Stats
     if (analysis.iso_freq && Object.keys(analysis.iso_freq).length > 0) {
-        html += '<div class="result-card"><h3>ISO Settings</h3>';
+        const chartId = 'chart-isos';
+        html += `<div class="result-card"><h3>ISO Settings</h3><div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; align-items: start;"><div>`;
         const isos = Object.entries(analysis.iso_freq)
-            .sort((a, b) => b[1] - a[1])
-            .slice(0, 10);
+            .sort((a, b) => parseInt(a[0]) - parseInt(b[0])); // Ascending order (smallest to largest)
         
         isos.forEach(([iso, count]) => {
             const percentage = ((count / analysis.total_photos) * 100).toFixed(1);
             html += `<p><strong>ISO ${iso}:</strong> ${count} photos (${percentage}%)</p>`;
         });
-        html += '</div>';
+        html += `</div><div><canvas id="${chartId}" style="height: 350px;"></canvas></div></div></div>`;
     }
 
     // Focal Length Stats
     if (analysis.focal_length_freq && Object.keys(analysis.focal_length_freq).length > 0) {
-        html += '<div class="result-card"><h3>Focal Lengths</h3>';
-        const focals = Object.entries(analysis.focal_length_freq)
-            .sort((a, b) => b[1] - a[1])
-            .slice(0, 10);
+        // Separate primes and zooms, bucket zooms by 10mm
+        const primes = {};
+        const zoomBuckets = {};
         
-        focals.forEach(([focal, count]) => {
-            const percentage = ((count / analysis.total_photos) * 100).toFixed(1);
-            html += `<p><strong>${focal}mm:</strong> ${count} photos (${percentage}%)</p>`;
+        Object.entries(analysis.focal_length_freq).forEach(([focal, count]) => {
+            const focalNum = parseFloat(focal);
+            
+            // Check if it's a "prime" focal length (common primes: 14, 16, 20, 24, 28, 35, 40, 50, 85, 100, 105, 135, 200, 300, 400, 500, 600)
+            const commonPrimes = [14, 16, 20, 24, 28, 35, 40, 50, 85, 100, 105, 135, 200, 300, 400, 500, 600];
+            if (commonPrimes.includes(focalNum)) {
+                primes[focal] = count;
+            } else {
+                // Bucket zooms by 10mm ranges
+                const bucketStart = Math.floor(focalNum / 10) * 10;
+                const bucketEnd = bucketStart + 9;
+                const bucketKey = `${bucketStart}-${bucketEnd}mm`;
+                zoomBuckets[bucketKey] = (zoomBuckets[bucketKey] || 0) + count;
+            }
         });
-        html += '</div>';
+        
+        // Check if we should show primes (show if "all" or "prime" is selected)
+        const showPrimes = !activeFilters.lens_type || activeFilters.lens_type === 'prime';
+        // Check if we should show zooms (show if "all" or "zoom" is selected)
+        const showZooms = !activeFilters.lens_type || activeFilters.lens_type === 'zoom';
+        
+        // Display primes
+        if (Object.keys(primes).length > 0 && showPrimes) {
+            const chartId = 'chart-primes';
+            html += `<div class="result-card"><h3>Prime Focal Lengths</h3><div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; align-items: start;"><div>`;
+            const sortedPrimes = Object.entries(primes)
+                .sort((a, b) => parseFloat(a[0]) - parseFloat(b[0]));
+            
+            sortedPrimes.forEach(([focal, count]) => {
+                const percentage = ((count / analysis.total_photos) * 100).toFixed(1);
+                const focalDisplay = parseInt(focal); // Remove decimals for primes
+                html += `<p><strong>${focalDisplay}mm:</strong> ${count} photos (${percentage}%)</p>`;
+            });
+            html += `</div><div><canvas id="${chartId}" style="height: 350px;"></canvas></div></div></div>`;
+        }
+        
+        // Display zoom ranges
+        if (Object.keys(zoomBuckets).length > 0 && showZooms) {
+            const chartId = 'chart-zooms';
+            html += `<div class="result-card"><h3>Zoom Focal Lengths (10mm buckets)</h3><div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; align-items: start;"><div>`;
+            const sortedZooms = Object.entries(zoomBuckets)
+                .sort((a, b) => {
+                    const aStart = parseInt(a[0].split('-')[0]);
+                    const bStart = parseInt(b[0].split('-')[0]);
+                    return aStart - bStart;
+                });
+            
+            sortedZooms.forEach(([range, count]) => {
+                const percentage = ((count / analysis.total_photos) * 100).toFixed(1);
+                html += `<p><strong>${range}:</strong> ${count} photos (${percentage}%)</p>`;
+            });
+            html += `</div><div><canvas id="${chartId}" style="height: 350px;"></canvas></div></div></div>`;
+        }
     }
-
     // Time of Day
     if (analysis.time_of_day_freq && Object.keys(analysis.time_of_day_freq).length > 0) {
-        html += '<div class="result-card"><h3>Time of Day</h3>';
+        const chartId = 'chart-timeofday';
+        html += `<div class="result-card"><h3>Time of Day</h3><div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; align-items: start;"><div>`;
         const times = Object.entries(analysis.time_of_day_freq)
             .sort((a, b) => b[1] - a[1]);
         
@@ -1485,10 +2255,123 @@ function displayAnalysisResults(analysis) {
             const percentage = ((count / analysis.total_photos) * 100).toFixed(1);
             html += `<p><strong>${time}:</strong> ${count} photos (${percentage}%)</p>`;
         });
-        html += '</div>';
+        html += `</div><div><canvas id="${chartId}" style="height: 350px;"></canvas></div></div></div>`;
     }
 
+    // Destroy all existing charts before setting new HTML
+    chartInstances.forEach(chart => {
+        if (chart) {
+            try {
+                chart.destroy();
+            } catch (e) {
+                console.warn('Error destroying chart:', e);
+            }
+        }
+    });
+    chartInstances = [];
+    
     resultsArea.innerHTML = html;
+    
+    // Render all charts after HTML is inserted
+    setTimeout(() => {
+        if (analysis.camera_freq && Object.keys(analysis.camera_freq).length > 0) {
+            const cameras = Object.entries(analysis.camera_freq).sort((a, b) => b[1] - a[1]);
+            createHistogramChart('chart-cameras', cameras.map(c => c[0]), cameras.map(c => c[1]), 'Camera Bodies', 'Camera Model', 'rgba(59, 130, 246, 0.8)', 'camera', cameras.map(c => c[0]));
+        }
+        if (analysis.lens_freq && Object.keys(analysis.lens_freq).length > 0) {
+            const lenses = Object.entries(analysis.lens_freq).sort((a, b) => a[0].localeCompare(b[0]));
+            createHistogramChart('chart-lenses', lenses.map(l => l[0]), lenses.map(l => l[1]), 'All Lenses', 'Lens', 'rgba(147, 51, 234, 0.8)', 'lens', lenses.map(l => l[0]));
+        }
+        if (analysis.aperture_freq && Object.keys(analysis.aperture_freq).length > 0) {
+            const apertures = Object.entries(analysis.aperture_freq)
+                .sort((a, b) => parseFloat(a[0]) - parseFloat(b[0]));
+            createHistogramChart('chart-apertures', apertures.map(a => `f/${a[0]}`), apertures.map(a => a[1]), 'Aperture Settings', 'Aperture', 'rgba(59, 130, 246, 0.8)', 'aperture', apertures.map(a => a[0]));
+        }
+        if (analysis.shutter_speed_freq && Object.keys(analysis.shutter_speed_freq).length > 0) {
+            const parseShutterSpeed = (speed) => {
+                if (speed.includes('/')) {
+                    const [num, denom] = speed.split('/').map(Number);
+                    return num / denom;
+                }
+                return parseFloat(speed);
+            };
+            const shutters = Object.entries(analysis.shutter_speed_freq)
+                .sort((a, b) => parseShutterSpeed(a[0]) - parseShutterSpeed(b[0]));
+            createHistogramChart('chart-shutters', shutters.map(s => `${s[0]}s`), shutters.map(s => s[1]), 'Shutter Speeds', 'Shutter Speed', 'rgba(168, 85, 247, 0.8)', 'shutter_speed', shutters.map(s => s[0]));
+        }
+        if (analysis.iso_freq && Object.keys(analysis.iso_freq).length > 0) {
+            const isos = Object.entries(analysis.iso_freq)
+                .sort((a, b) => parseInt(a[0]) - parseInt(b[0]));
+            createHistogramChart('chart-isos', isos.map(i => `ISO ${i[0]}`), isos.map(i => i[1]), 'ISO Settings', 'ISO', 'rgba(14, 165, 233, 0.8)', 'iso', isos.map(i => i[0]));
+        }
+        if (analysis.focal_length_freq && Object.keys(analysis.focal_length_freq).length > 0) {
+            const primes = {};
+            const zoomBuckets = {};
+            const commonPrimes = [14, 16, 20, 24, 28, 35, 40, 50, 85, 100, 105, 135, 200, 300, 400, 500, 600];
+            
+            Object.entries(analysis.focal_length_freq).forEach(([focal, count]) => {
+                const focalNum = parseFloat(focal);
+                if (commonPrimes.includes(focalNum)) {
+                    primes[focal] = count;
+                } else {
+                    const bucketStart = Math.floor(focalNum / 10) * 10;
+                    const bucketEnd = bucketStart + 9;
+                    const bucketKey = `${bucketStart}-${bucketEnd}mm`;
+                    zoomBuckets[bucketKey] = (zoomBuckets[bucketKey] || 0) + count;
+                }
+            });
+            
+            if (Object.keys(primes).length > 0) {
+                const sortedPrimes = Object.entries(primes).sort((a, b) => parseFloat(a[0]) - parseFloat(b[0]));
+                createHistogramChart('chart-primes', sortedPrimes.map(p => `${parseInt(p[0])}mm`), sortedPrimes.map(p => p[1]), 'Prime Focal Lengths', 'Focal Length', 'rgba(236, 72, 153, 0.8)', 'focal_length', sortedPrimes.map(p => p[0]));
+            }
+            if (Object.keys(zoomBuckets).length > 0) {
+                const sortedZooms = Object.entries(zoomBuckets)
+                    .sort((a, b) => {
+                        const aStart = parseInt(a[0].split('-')[0]);
+                        const bStart = parseInt(b[0].split('-')[0]);
+                        return aStart - bStart;
+                    });
+                createHistogramChart('chart-zooms', sortedZooms.map(z => z[0]), sortedZooms.map(z => z[1]), 'Zoom Focal Lengths (10mm buckets)', 'Focal Length Range', 'rgba(139, 92, 246, 0.8)', null, sortedZooms.map(z => z[0]));
+            }
+        }
+        if (analysis.time_of_day_freq && Object.keys(analysis.time_of_day_freq).length > 0) {
+            const times = Object.entries(analysis.time_of_day_freq).sort((a, b) => b[1] - a[1]);
+            createHistogramChart('chart-timeofday', times.map(t => t[0]), times.map(t => t[1]), 'Time of Day', 'Time Period', 'rgba(251, 146, 60, 0.8)', 'time_of_day', times.map(t => t[0]));
+        }
+        
+        // Restore lens type button states after HTML re-render
+        updateLensTypeButtons();
+    }, 100);
+}
+
+// Helper function to update lens type button states
+function updateLensTypeButtons() {
+    const allBtn = document.getElementById('btn-all');
+    const primeBtn = document.getElementById('btn-prime');
+    const zoomBtn = document.getElementById('btn-zoom');
+    
+    if (!allBtn || !primeBtn || !zoomBtn) return;
+    
+    // Reset all buttons to inactive state
+    allBtn.style.background = 'rgba(75, 85, 99, 0.5)';
+    allBtn.style.color = '#9ca3af';
+    primeBtn.style.background = 'rgba(75, 85, 99, 0.5)';
+    primeBtn.style.color = '#9ca3af';
+    zoomBtn.style.background = 'rgba(75, 85, 99, 0.5)';
+    zoomBtn.style.color = '#9ca3af';
+    
+    // Highlight active button based on current state
+    if (activeLensType === 'all' || !activeFilters.lens_type) {
+        allBtn.style.background = 'rgba(59, 130, 246, 0.8)';
+        allBtn.style.color = 'white';
+    } else if (activeLensType === 'prime' || activeFilters.lens_type === 'prime') {
+        primeBtn.style.background = 'rgba(236, 72, 153, 0.8)';
+        primeBtn.style.color = 'white';
+    } else if (activeLensType === 'zoom' || activeFilters.lens_type === 'zoom') {
+        zoomBtn.style.background = 'rgba(139, 92, 246, 0.8)';
+        zoomBtn.style.color = 'white';
+    }
 }
 
 async function generateWrapped(group, category, taskId) {
@@ -1942,7 +2825,7 @@ function renderDatabaseTable() {
             html += `<td style="padding: 10px; text-align: right;">${session.total_photos}</td>`;
             html += `<td style="padding: 10px; text-align: right;"><input type="number" id="edit-raw-${session.id}" value="${session.total_raw_photos || ''}" placeholder="-" onkeypress="if(event.key==='Enter')saveSessionEdit(${session.id})" style="width: 60px; padding: 4px; background: var(--background); color: var(--text-primary); border: 1px solid var(--border-color); border-radius: 4px; text-align: right;"></td>`;
             html += `<td style="padding: 10px; text-align: right;">${session.hit_rate !== null ? session.hit_rate + '%' : '-'}</td>`;
-            html += `<td style="padding: 10px;">${session.date || '-'}</td>`;
+            html += `<td style="padding: 10px;">${session.date ? session.date.split('T')[0].split(' ')[0] : '-'}</td>`;
             html += `<td style="padding: 10px; text-align: center;">`;
             html += `<button onclick="saveSessionEdit(${session.id})" style="background: none; border: none; cursor: pointer; color: #4CAF50; font-size: 16px; margin-right: 8px;" title="Save">✓</button>`;
             html += `<button onclick="cancelSessionEdit()" style="background: none; border: none; cursor: pointer; color: #f44336; font-size: 16px;" title="Cancel">✗</button>`;
@@ -1955,10 +2838,11 @@ function renderDatabaseTable() {
             html += `<td style="padding: 10px; text-align: right;">${session.total_photos}</td>`;
             html += `<td style="padding: 10px; text-align: right;">${session.total_raw_photos || '-'}</td>`;
             html += `<td style="padding: 10px; text-align: right;">${session.hit_rate !== null ? session.hit_rate + '%' : '-'}</td>`;
-            html += `<td style="padding: 10px;">${session.date || '-'}</td>`;
-            html += `<td style="padding: 10px; text-align: center;">`;
-            html += `<button onclick="editSession(${session.id})" style="background: none; border: none; cursor: pointer; color: var(--text-secondary); font-size: 16px; margin-right: 8px;" title="Edit">✏️</button>`;
-            html += `<button onclick="deleteSession(${session.id}, '${escapeHtml(session.name).replace(/'/g, "\\'")}')" style="background: none; border: none; cursor: pointer; color: var(--text-secondary); font-size: 16px;" title="Delete">🗑️</button>`;
+            html += `<td style="padding: 10px;">${session.date ? session.date.split('T')[0].split(' ')[0] : '-'}</td>`;
+            html += `<td style="padding: 10px; text-align: center; white-space: nowrap;">`;
+            html += `<button onclick="showSessionDetails(${session.id})" style="background: none; border: none; cursor: pointer; color: var(--text-secondary); font-size: 16px; padding: 0 8px;" title="Details">ℹ️</button>`;
+            html += `<button onclick="editSession(${session.id})" style="background: none; border: none; cursor: pointer; color: var(--text-secondary); font-size: 16px; padding: 0 8px;" title="Edit">✏️</button>`;
+            html += `<button onclick="deleteSession(${session.id}, '${escapeHtml(session.name).replace(/'/g, "\\'")}')" style="background: none; border: none; cursor: pointer; color: var(--text-secondary); font-size: 16px; padding: 0 8px;" title="Delete">🗑️</button>`;
             html += `</td>`;
         }
         
@@ -1975,6 +2859,45 @@ function renderDatabaseTable() {
         const text = th.textContent.replace(/[▲▼]/g, '').trim();
         th.textContent = th.dataset.sort === dbData.sortColumn ? text + arrow : text;
     });
+}
+
+function showSessionDetails(sessionId) {
+    const session = dbData.sessions.find(s => s.id === sessionId);
+    if (!session) {
+        alert('Session not found');
+        return;
+    }
+
+    const modal = document.getElementById('details-modal');
+    const modalTitle = document.getElementById('modal-title');
+    const modalBody = document.getElementById('modal-body');
+
+    modalTitle.textContent = 'Session Details';
+
+    // Format date without timestamp
+    let dateDisplay = 'Not found';
+    if (session.date) {
+        const dateOnly = session.date.split('T')[0].split(' ')[0];
+        dateDisplay = `${dateOnly} (${session.date_detected || 'provided'})`;
+    }
+
+    modalBody.innerHTML = `
+        <div style="padding: 20px; font-family: monospace; line-height: 1.8;">
+            <div style="font-size: 1.5em; font-weight: bold; margin-bottom: 20px;">${session.name}</div>
+            <div><strong>Category:</strong> ${session.category}</div>
+            <div><strong>Group:</strong> ${session.group}</div>
+            <div><strong>Session Name:</strong> ${session.name}</div>
+            ${session.folder_path ? `<div><strong>Path:</strong> ${session.folder_path}</div>` : ''}
+            <div><strong>Session ID:</strong> ${session.id}</div>
+            <div><strong>Total Final Edits:</strong> ${session.total_photos}</div>
+            ${session.total_raw_photos ? `<div><strong>Total RAW Photos:</strong> ${session.total_raw_photos}</div>` : ''}
+            ${session.hit_rate !== null ? `<div><strong>Hit Rate:</strong> ${session.hit_rate.toFixed(1)}%</div>` : ''}
+            <div><strong>Date:</strong> ${dateDisplay}</div>
+            ${session.hit_rate !== null ? `<div><strong>Hit Rate Calculation:</strong> Enabled</div>` : ''}
+        </div>
+    `;
+
+    modal.style.display = 'block';
 }
 
 function displaySessions(sessions) {

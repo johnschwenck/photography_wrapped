@@ -18,6 +18,7 @@ Usage:
 import os
 import sys
 import json
+import re
 import logging
 from pathlib import Path
 from datetime import datetime
@@ -125,6 +126,176 @@ def browse_folder():
         return jsonify({'error': str(e)}), 500
 
 
+@app.route('/api/check-duplicates', methods=['POST'])
+def check_duplicates():
+    """
+    Check for potential duplicate sessions before extraction.
+    
+    Request JSON:
+        {
+            "category": "category_name",
+            "group": "group_name",
+            "session_name": "session_name" (optional),
+            "date": "2025-12-04" (optional)
+        }
+    
+    Returns:
+        JSON with list of similar existing sessions
+    """
+    try:
+        data = request.json
+        category = (data.get('category') or '').strip()
+        group = (data.get('group') or '').strip()
+        session_name = (data.get('session_name') or '').strip()
+        date_str = (data.get('date') or '').strip()
+        input_total_photos = data.get('total_photos')
+        input_total_raw_photos = data.get('total_raw_photos')
+        input_hit_rate = data.get('hit_rate')
+        
+        if not category or not group:
+            return jsonify({'similar_sessions': []}), 200
+        
+        # Connect to database
+        db = DatabaseManager.from_config(CONFIG_PATH)
+        
+        # Normalize input for comparison
+        norm_category = db.normalize_for_comparison(category)
+        norm_group = db.normalize_for_comparison(group)
+        
+        # Parse date if provided
+        session_date = None
+        if date_str:
+            try:
+                session_date = datetime.fromisoformat(date_str).date()
+            except ValueError:
+                logger.warning(f"Invalid date format: {date_str}")
+        
+        # Find similar sessions with multiple strategies:
+        # 1. Exact match on category + group + session_name (if provided)
+        # 2. Match on category + group + date (if date provided)
+        with db.get_cursor() as cursor:
+            similar_sessions_dict = {}  # Use dict to deduplicate
+            
+            # Strategy 1: Check by session name if provided
+            if session_name:
+                norm_session_name = db.normalize_for_comparison(session_name)
+                cursor.execute("""
+                    SELECT DISTINCT name, category, group_name, date, date_detected,
+                           total_photos, total_raw_photos, hit_rate
+                    FROM sessions
+                    WHERE LOWER(TRIM(category)) = ? 
+                      AND LOWER(TRIM(group_name)) = ?
+                      AND LOWER(TRIM(name)) = ?
+                """, (norm_category, norm_group, norm_session_name))
+                for row in cursor.fetchall():
+                    key = (row['category'], row['group_name'], row['name'])
+                    similar_sessions_dict[key] = row
+            
+            # Strategy 2: Check by date if provided (catches duplicates with different names)
+            if session_date:
+                cursor.execute("""
+                    SELECT DISTINCT name, category, group_name, date, date_detected,
+                           total_photos, total_raw_photos, hit_rate
+                    FROM sessions
+                    WHERE LOWER(TRIM(category)) = ? 
+                      AND LOWER(TRIM(group_name)) = ?
+                      AND date(date) = date(?)
+                """, (norm_category, norm_group, session_date.isoformat()))
+                for row in cursor.fetchall():
+                    key = (row['category'], row['group_name'], row['name'])
+                    similar_sessions_dict[key] = row
+            
+            # If neither session_name nor date provided, just check category + group
+            if not session_name and not session_date:
+                cursor.execute("""
+                    SELECT DISTINCT name, category, group_name, date, date_detected,
+                           total_photos, total_raw_photos, hit_rate
+                    FROM sessions
+                    WHERE LOWER(TRIM(category)) = ? AND LOWER(TRIM(group_name)) = ?
+                """, (norm_category, norm_group))
+                for row in cursor.fetchall():
+                    key = (row['category'], row['group_name'], row['name'])
+                    similar_sessions_dict[key] = row
+            
+            
+            # Convert dict values to list and calculate match percentage
+            similar_sessions = []
+            for row in similar_sessions_dict.values():
+                # Calculate match percentage based on matching fields
+                # Fields to compare: category, group, date, total_photos, total_raw_photos, hit_rate
+                # (excluding session name since that's what differs)
+                matches = 0
+                total_fields = 0
+                
+                # Category (always included in query, so always matches)
+                matches += 1
+                total_fields += 1
+                
+                # Group (always included in query, so always matches)
+                matches += 1
+                total_fields += 1
+                
+                # Date
+                total_fields += 1
+                if session_date and row['date']:
+                    existing_date = row['date'].split('T')[0] if 'T' in str(row['date']) else str(row['date'])
+                    if existing_date == session_date.isoformat():
+                        matches += 1
+                elif not session_date and not row['date']:
+                    matches += 1  # Both have no date
+                
+                # Total photos (Final Edits)
+                if input_total_photos is not None:
+                    total_fields += 1
+                    if row['total_photos'] == input_total_photos:
+                        matches += 1
+                
+                # Total raw photos
+                if input_total_raw_photos is not None:
+                    total_fields += 1
+                    if row['total_raw_photos'] == input_total_raw_photos:
+                        matches += 1
+                
+                # Hit rate (compare within 1% tolerance since it's a calculated float)
+                if input_hit_rate is not None and row['hit_rate'] is not None:
+                    total_fields += 1
+                    if abs(row['hit_rate'] - input_hit_rate) < 1.0:
+                        matches += 1
+                elif input_hit_rate is None and row['hit_rate'] is None:
+                    # Both don't have hit rate (no RAW folder) - this counts as a match
+                    total_fields += 1
+                    matches += 1
+                
+                match_percentage = (matches / total_fields * 100) if total_fields > 0 else 0
+                
+                logger.debug(f"  Session '{row['name']}': {matches}/{total_fields} fields match = {match_percentage:.1f}%")
+                
+                similar_sessions.append({
+                    'name': row['name'],
+                    'category': row['category'],
+                    'group': row['group_name'],
+                    'date': row['date'],
+                    'date_detected': row['date_detected'],
+                    'total_photos': row['total_photos'],
+                    'total_raw_photos': row['total_raw_photos'],
+                    'hit_rate': row['hit_rate'],
+                    'match_percentage': round(match_percentage, 1)
+                })
+        
+        logger.info(f"Duplicate check: '{category}' / '{group}' / '{session_name}' / date={date_str} -> Found {len(similar_sessions)} similar session(s)")
+        
+        return jsonify({
+            'similar_sessions': similar_sessions,
+            'input_category': category,
+            'input_group': group,
+            'input_session_name': session_name
+        }), 200
+        
+    except Exception as e:
+        logger.error(f"Error checking duplicates: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/api/extract', methods=['POST'])
 def extract_metadata():
     """
@@ -148,7 +319,10 @@ def extract_metadata():
     try:
         data = request.json
         folder_path = data.get('folder_path')
-        session_name = data.get('session_name') or os.path.basename(folder_path)
+        session_name = data.get('session_name')
+        # If session_name is None or empty string, use basename as fallback
+        if not session_name:
+            session_name = os.path.basename(folder_path)
         date_str = data.get('date_str') or data.get('date')  # Support both parameter names
         use_date_heuristics = data.get('use_date_heuristics', True)
         use_filename_dates = data.get('use_filename_dates', True)
@@ -157,7 +331,8 @@ def extract_metadata():
         description = data.get('description')
         calculate_hit_rate = data.get('calculate_hit_rate', True)
         
-        logger.info(f"Extract request - use_date_heuristics: {use_date_heuristics}, date_str: {date_str}, folder: {folder_path}")
+        logger.info(f"Extract request - session_name: '{session_name}', folder: {folder_path}")
+        logger.info(f"Extract request - use_date_heuristics: {use_date_heuristics}, date_str: {date_str}")
         
         # Parse date if provided
         session_date = None
@@ -298,17 +473,38 @@ def crawl_folders():
         
         for idx, folder_path in enumerate(target_folders, 1):
             # Extract session name from path
+            # Priority: folder with date pattern > non-generic folder > endpoint folder
             parent_parts = Path(folder_path).parts
             session_name = None
+            date_pattern_folder = None
+            non_generic_folder = None
+            
+            # Date patterns to look for
+            date_patterns = [
+                r'\d{4}[-_]\d{2}[-_]\d{2}',  # YYYY-MM-DD or YYYY_MM_DD
+                r'\d{2}[-_]\d{2}[-_]\d{4}',  # MM-DD-YYYY or MM_DD_YYYY
+                r'\d{8}',                      # YYYYMMDD
+                r'\d{2}[-_]\d{2}[-_]\d{2}'   # YY-MM-DD or MM-DD-YY
+            ]
+            
+            generic_folders = ['photos', 'edited', 'raw', 'images', 'jpg', 'jpeg', 'export', 'exported']
             
             for j in range(len(parent_parts) - 1, -1, -1):
                 part = parent_parts[j]
-                if part.lower() not in ['photos', 'edited', 'raw', 'images', 'jpg', 'jpeg']:
-                    session_name = part.replace(' ', '_')
-                    break
+                part_lower = part.lower()
+                
+                # Check if folder has a date pattern
+                has_date = any(re.search(pattern, part, re.IGNORECASE) for pattern in date_patterns)
+                
+                if has_date and not date_pattern_folder:
+                    date_pattern_folder = part
+                
+                if part_lower not in generic_folders and not non_generic_folder:
+                    non_generic_folder = part
             
-            if not session_name:
-                session_name = os.path.basename(folder_path)
+            # Use priority order: date pattern > non-generic > endpoint
+            session_name = date_pattern_folder or non_generic_folder or os.path.basename(folder_path)
+            session_name = session_name.replace(' ', '_')
             
             logger.info(f"Processing {idx} of {len(target_folders)} - {session_name} (Category: {category}, Group: {group})")
             
@@ -433,6 +629,7 @@ def analyze_database():
         category: Optional category filter
         group: Optional group filter
         sessions: Optional list of specific session names to analyze
+        filters: Optional dict of metadata filters (camera, lens, aperture, shutter_speed, iso, focal_length, time_of_day)
     
     Returns:
         JSON with comprehensive analysis results
@@ -442,39 +639,90 @@ def analyze_database():
         category = data.get('category')
         group = data.get('group')
         sessions = data.get('sessions')  # List of session names
+        filters = data.get('filters', {})  # Metadata filters for drill-down
+        
+        print(f"[ANALYZE_DATABASE] Received request:")
+        print(f"  Category: {category}")
+        print(f"  Group: {group}")
+        print(f"  Sessions: {sessions}")
+        print(f"  Filters: {filters}")
         
         db = DatabaseManager.from_config(CONFIG_PATH)
         analyzer = StatisticsAnalyzer(db)
         
-        # Build analysis based on filters
+        # Get session IDs based on category/group/sessions filters
+        conn = db.conn
+        session_ids = []
+        
         if sessions and len(sessions) > 0:
-            # Analyze specific sessions
-            conn = db.conn
+            # Get specific sessions by name
             placeholders = ','.join('?' * len(sessions))
             session_rows = conn.execute(
-                f"SELECT * FROM sessions WHERE name IN ({placeholders})",
+                f"SELECT id FROM sessions WHERE name IN ({placeholders})",
                 sessions
             ).fetchall()
+            session_ids = [s['id'] for s in session_rows]
+        elif category and group:
+            # Get sessions by category and group
+            session_rows = conn.execute(
+                "SELECT id FROM sessions WHERE category = ? AND group_name = ?",
+                (category, group)
+            ).fetchall()
+            session_ids = [s['id'] for s in session_rows]
+        elif category:
+            # Get sessions by category
+            session_rows = conn.execute(
+                "SELECT id FROM sessions WHERE category = ?",
+                (category,)
+            ).fetchall()
+            session_ids = [s['id'] for s in session_rows]
+        elif group:
+            # Get sessions by group
+            session_rows = conn.execute(
+                "SELECT id FROM sessions WHERE group_name = ?",
+                (group,)
+            ).fetchall()
+            session_ids = [s['id'] for s in session_rows]
+        else:
+            # Get all sessions
+            session_rows = conn.execute("SELECT id FROM sessions").fetchall()
+            session_ids = [s['id'] for s in session_rows]
+        
+        if not session_ids:
+            return jsonify({'error': 'No matching sessions found'}), 404
+        
+        print(f"[ANALYZE_DATABASE] Session IDs: {len(session_ids)}")
+        print(f"[ANALYZE_DATABASE] Filters type: {type(filters)}, value: {filters}, len: {len(filters) if filters else 0}")
+        
+        # Apply metadata filters if provided
+        if filters and len(filters) > 0:
+            print(f"[ANALYZE_DATABASE] *** APPLYING FILTERS ***")
+            print(f"[ANALYZE_DATABASE] Applying filters to {len(session_ids)} sessions")
+            print(f"[ANALYZE_DATABASE] Filter details: {filters}")
             
-            if not session_rows:
-                return jsonify({'error': 'No matching sessions found'}), 404
+            # Use filtered analysis
+            analysis = analyzer.analyze_with_filters(session_ids, filters)
+            analysis_dict = analysis.to_dict()
+            analysis_dict['filtered'] = True
+            analysis_dict['active_filters'] = filters
             
-            # Calculate statistics for selected sessions
-            total_sessions = len(session_rows)
-            total_photos = sum(s['total_photos'] for s in session_rows)
-            total_raw = sum(s['total_raw_photos'] or 0 for s in session_rows)
+            print(f"[ANALYZE_DATABASE] Filtered result: {analysis.total_photos} photos")
+            print(f"[ANALYZE_DATABASE] Lens freq: {dict(analysis.lens_freq)}")
+            print(f"[ANALYZE_DATABASE] Camera freq: {dict(analysis.camera_freq)}")
             
-            hit_rates = [s['hit_rate'] for s in session_rows if s['hit_rate'] is not None]
-            avg_hit_rate = sum(hit_rates) / len(hit_rates) if hit_rates else None
-            
-            analysis_dict = {
-                'scope': 'sessions',
-                'total_sessions': total_sessions,
-                'total_photos': total_photos,
-                'total_raw_photos': total_raw,
-                'average_hit_rate': round(avg_hit_rate, 2) if avg_hit_rate else None,
-                'sessions': [dict(s) for s in session_rows]
-            }
+            return jsonify({
+                'success': True,
+                'analysis': analysis_dict
+            })
+        
+        # Original logic for unfiltered analysis
+        # Build analysis based on filters
+        if sessions and len(sessions) > 0:
+            # Analyze specific sessions - use analyzer to get full frequency data
+            print(f"[ANALYZE_DATABASE] Analyzing {len(session_ids)} sessions")
+            analysis = analyzer.analyze_sessions(session_ids, name="Selected Sessions")
+            analysis_dict = analysis.to_dict()
+            analysis_dict['scope'] = 'sessions'
             
             return jsonify({
                 'success': True,
@@ -490,73 +738,40 @@ def analyze_database():
             # Analyze entire group across all categories
             analysis = analyzer.analyze_group(group)
         else:
-            # Analyze entire database
-            # Get all sessions and aggregate
+            # Analyze entire database - use analyzer for full statistics
+            analysis = analyzer.analyze_sessions(session_ids, name="All Data")
+            
+            # Add categories and groups breakdown for "All Data" view
             conn = db.conn
-            sessions = conn.execute("SELECT * FROM sessions ORDER BY date DESC").fetchall()
-            
-            if not sessions:
-                return jsonify({'error': 'No data in database'}), 404
-            
-            # Calculate global statistics
-            total_sessions = len(sessions)
-            total_photos = sum(s['total_photos'] for s in sessions)
-            total_raw = sum(s['total_raw_photos'] or 0 for s in sessions)
-            
-            # Calculate average hit rate (exclude nulls)
-            hit_rates = [s['hit_rate'] for s in sessions if s['hit_rate'] is not None]
-            avg_hit_rate = sum(hit_rates) / len(hit_rates) if hit_rates else None
+            all_sessions = conn.execute("SELECT * FROM sessions").fetchall()
             
             # Get category breakdown
             categories = {}
-            for session in sessions:
+            for session in all_sessions:
                 cat = session['category'] or 'Uncategorized'
-                # Use original case but check case-insensitive for duplicates
-                cat_key = cat
-                if cat_key not in categories:
-                    categories[cat_key] = {'sessions': 0, 'photos': 0}
-                categories[cat_key]['sessions'] += 1
-                categories[cat_key]['photos'] += session['total_photos']
+                if cat not in categories:
+                    categories[cat] = {'sessions': 0, 'photos': 0}
+                categories[cat]['sessions'] += 1
+                categories[cat]['photos'] += session['total_photos']
             
             # Get group breakdown
             groups = {}
-            for session in sessions:
+            for session in all_sessions:
                 grp = session['group_name'] or 'Ungrouped'
-                # Use original case but check case-insensitive for duplicates
-                grp_key = grp
-                # Check if we already have this group with different case
-                existing_key = None
-                for existing in groups.keys():
-                    if existing.lower() == grp_key.lower():
-                        existing_key = existing
-                        break
-                
-                if existing_key:
-                    groups[existing_key]['sessions'] += 1
-                    groups[existing_key]['photos'] += session['total_photos']
-                else:
-                    groups[grp_key] = {'sessions': 0, 'photos': 0}
-                    groups[grp_key]['sessions'] += 1
-                    groups[grp_key]['photos'] += session['total_photos']
+                if grp not in groups:
+                    groups[grp] = {'sessions': 0, 'photos': 0}
+                groups[grp]['sessions'] += 1
+                groups[grp]['photos'] += session['total_photos']
             
-            analysis_dict = {
-                'scope': 'database',
-                'total_sessions': total_sessions,
-                'total_photos': total_photos,
-                'total_raw_photos': total_raw,
-                'average_hit_rate': round(avg_hit_rate, 2) if avg_hit_rate else None,
-                'categories': categories,
-                'groups': groups,
-                'sessions': [dict(s) for s in sessions[:10]]  # Include first 10 sessions
-            }
-            
-            return jsonify({
-                'success': True,
-                'analysis': analysis_dict
-            })
+            analysis.metadata['categories'] = categories
+            analysis.metadata['groups'] = groups
         
         # Convert analysis object to dict if we used analyzer
         analysis_dict = analysis.to_dict() if hasattr(analysis, 'to_dict') else analysis
+        
+        # Add metadata about the query
+        analysis_dict['query_category'] = category
+        analysis_dict['query_group'] = group
         
         return jsonify({
             'success': True,
@@ -729,7 +944,8 @@ def database_overview():
         
         # Get all sessions with details
         sessions = db.conn.execute("""
-            SELECT id, name, category, group_name, total_photos, total_raw_photos, hit_rate, date
+            SELECT id, name, category, group_name, total_photos, total_raw_photos, hit_rate, date, 
+                   folder_path, date_detected
             FROM sessions
             ORDER BY date DESC
         """).fetchall()
@@ -744,7 +960,9 @@ def database_overview():
                 'total_photos': session['total_photos'],
                 'total_raw_photos': session['total_raw_photos'] or 0,
                 'hit_rate': round(session['hit_rate'], 1) if session['hit_rate'] is not None else None,
-                'date': session['date']
+                'date': session['date'],
+                'folder_path': session['folder_path'],
+                'date_detected': session['date_detected']
             })
         
         return jsonify({
@@ -879,6 +1097,59 @@ def delete_by_group():
         
     except Exception as e:
         logger.error(f"Error deleting by group: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/database/rename-sessions', methods=['POST'])
+def rename_sessions():
+    """
+    Rename all sessions matching a category/group to new values.
+    Used for resolving duplicate naming conflicts.
+    
+    Request JSON:
+        {
+            "old_category": "old_category_name",
+            "old_group": "old_group_name",
+            "new_category": "new_category_name",
+            "new_group": "new_group_name"
+        }
+    
+    Returns:
+        JSON with count of updated sessions
+    """
+    try:
+        data = request.json
+        old_category = data.get('old_category', '').strip()
+        old_group = data.get('old_group', '').strip()
+        new_category = data.get('new_category', '').strip()
+        new_group = data.get('new_group', '').strip()
+        
+        if not all([old_category, old_group, new_category, new_group]):
+            return jsonify({'error': 'All fields are required'}), 400
+        
+        db = DatabaseManager.from_config(CONFIG_PATH)
+        
+        # Get all sessions matching old category/group
+        with db.get_cursor() as cursor:
+            cursor.execute("""
+                UPDATE sessions 
+                SET category = ?, group_name = ?
+                WHERE category = ? AND group_name = ?
+            """, (new_category, new_group, old_category, old_group))
+            
+            updated_count = cursor.rowcount
+        
+        logger.info(f"Renamed {updated_count} sessions from '{old_category}/{old_group}' to '{new_category}/{new_group}'")
+        
+        return jsonify({
+            'success': True,
+            'updated_sessions': updated_count,
+            'old': {'category': old_category, 'group': old_group},
+            'new': {'category': new_category, 'group': new_group}
+        })
+        
+    except Exception as e:
+        logger.error(f"Error renaming sessions: {e}", exc_info=True)
         return jsonify({'error': str(e)}), 500
 
 

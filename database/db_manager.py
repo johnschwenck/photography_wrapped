@@ -139,6 +139,28 @@ class DatabaseManager:
             self.conn.commit()  # type: ignore
             logger.info("Database schema initialized")
     
+    @staticmethod
+    def normalize_for_comparison(text: str) -> str:
+        """
+        Normalize text for duplicate comparison.
+        - Converts to lowercase
+        - Preserves internal whitespace/underscores (so "hc rc" != "hcrc")
+        - Strips leading/trailing whitespace
+        
+        Args:
+            text: Text to normalize
+        
+        Returns:
+            Normalized text
+        
+        Example:
+            >>> DatabaseManager.normalize_for_comparison("HCRC")
+            'hcrc'
+            >>> DatabaseManager.normalize_for_comparison("  Test Name  ")
+            'test name'
+        """
+        return text.strip().lower()
+    
     @contextmanager
     def get_cursor(self):
         """
@@ -332,6 +354,27 @@ class DatabaseManager:
             category = self.get_or_create_category(session.category)
             assert category.id is not None, "Category ID should not be None after creation"
             group = self.get_or_create_group(session.group, category.id)
+            
+            # Check for case-insensitive duplicates
+            norm_name = self.normalize_for_comparison(session.name)
+            norm_category = self.normalize_for_comparison(session.category)
+            norm_group = self.normalize_for_comparison(session.group)
+            
+            cursor.execute("""
+                SELECT id, name, category, group_name 
+                FROM sessions 
+                WHERE LOWER(TRIM(name)) = ? 
+                AND LOWER(TRIM(category)) = ? 
+                AND LOWER(TRIM(group_name)) = ?
+            """, (norm_name, norm_category, norm_group))
+            
+            existing = cursor.fetchone()
+            if existing:
+                raise ValueError(
+                    f"Session already exists with similar name (ID: {existing['id']}). "
+                    f"Existing: '{existing['name']}' / '{existing['category']}' / '{existing['group_name']}' "
+                    f"vs New: '{session.name}' / '{session.category}' / '{session.group}'"
+                )
             
             # Debug logging for date
             logger.info(f"Creating session '{session.name}' with date: {session.date} (type: {type(session.date)})")

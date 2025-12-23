@@ -183,6 +183,16 @@ class StatisticsAnalyzer:
         # Store category metadata
         analysis.metadata['category'] = category_name
         
+        # Add groups breakdown
+        groups = {}
+        for session in sessions:
+            grp = session.group or 'Ungrouped'
+            if grp not in groups:
+                groups[grp] = {'sessions': 0, 'photos': 0}
+            groups[grp]['sessions'] += 1
+            groups[grp]['photos'] += session.total_photos
+        analysis.metadata['groups'] = groups
+        
         # Cache if enabled
         if self.enable_caching:
             self._cache_aggregated_stats(analysis, 'category', category_name)
@@ -283,3 +293,82 @@ class StatisticsAnalyzer:
         summary['most_used'] = all_lenses[:10]
         
         return summary
+    
+    def analyze_with_filters(self, session_ids: List[int], filters: dict, name: str = "Filtered Analysis") -> Analysis:
+        """
+        Analyze photos with metadata filters applied.
+        
+        Args:
+            session_ids: List of session IDs to analyze
+            filters: Dict of metadata filters (camera, lens, aperture, shutter_speed, iso, focal_length, time_of_day)
+            name: Name for the filtered analysis
+        
+        Returns:
+            Analysis instance with filtered statistics
+        """
+        if not session_ids:
+            raise ValueError("No session IDs provided")
+        
+        # Get all photos from specified sessions
+        all_photos = []
+        for session_id in session_ids:
+            photos = self.db.get_photos_by_session(session_id)
+            all_photos.extend(photos)
+        
+        # Apply filters
+        filtered_photos = all_photos
+        
+        if 'camera' in filters:
+            filtered_photos = [p for p in filtered_photos if p.camera == filters['camera']]
+        
+        if 'lens' in filters:
+            filtered_photos = [p for p in filtered_photos if p.lens == filters['lens']]
+        
+        if 'aperture' in filters:
+            # Convert to string for comparison (e.g., "1.4")
+            filter_aperture = str(filters['aperture'])
+            filtered_photos = [p for p in filtered_photos if p.aperture and str(p.aperture) == filter_aperture]
+        
+        if 'shutter_speed' in filters:
+            filtered_photos = [p for p in filtered_photos if p.shutter_speed == filters['shutter_speed']]
+        
+        if 'iso' in filters:
+            # Convert to string for comparison
+            filter_iso = str(filters['iso'])
+            filtered_photos = [p for p in filtered_photos if p.iso and str(p.iso) == filter_iso]
+        
+        if 'focal_length' in filters:
+            # Convert to float for comparison
+            filter_focal = float(filters['focal_length'])
+            filtered_photos = [p for p in filtered_photos if p.focal_length and abs(float(p.focal_length) - filter_focal) < 0.1]
+        
+        if 'time_of_day' in filters:
+            filtered_photos = [p for p in filtered_photos if p.time_of_day == filters['time_of_day']]
+        
+        if 'lens_type' in filters:
+            # Filter by prime or zoom lenses
+            if filters['lens_type'] == 'prime':
+                # Prime lenses have fixed focal lengths (no range in name)
+                filtered_photos = [p for p in filtered_photos if p.lens and '-' not in p.lens]
+            elif filters['lens_type'] == 'zoom':
+                # Zoom lenses have focal length ranges (contain '-')
+                filtered_photos = [p for p in filtered_photos if p.lens and '-' in p.lens]
+        
+        # Create temporary session-like object with filtered photos
+        from models.session import Session
+        temp_session = Session(
+            name=name,
+            category="Filtered",
+            group="Filtered"
+        )
+        temp_session.photos = filtered_photos
+        temp_session.total_photos = len(filtered_photos)
+        
+        # Calculate statistics on filtered photos
+        stats = temp_session.calculate_statistics()
+        
+        # Create Analysis object
+        analysis = Analysis(name=name)
+        analysis.add_session_stats(stats)
+        
+        return analysis
