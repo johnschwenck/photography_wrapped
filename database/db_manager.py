@@ -565,6 +565,48 @@ class DatabaseManager:
                 ))
         
         return photos
+
+    def get_photos_by_sessions(self, session_ids: List[int]) -> List[PhotoMetadata]:
+        """Get all photos for multiple sessions in one query."""
+        if not session_ids:
+            return []
+
+        photos: List[PhotoMetadata] = []
+        placeholders = ','.join('?' * len(session_ids))
+        with self.get_cursor() as cursor:
+            cursor.execute(
+                f"SELECT * FROM photos WHERE session_id IN ({placeholders}) ORDER BY session_id, file_name",
+                tuple(session_ids)
+            )
+
+            for row in cursor.fetchall():
+                photos.append(PhotoMetadata(
+                    id=row['id'],  # type: ignore
+                    session_id=row['session_id'],  # type: ignore
+                    file_path=row['file_path'],  # type: ignore
+                    file_name=row['file_name'],  # type: ignore
+                    camera=row['camera'],  # type: ignore
+                    lens=row['lens_name'],  # type: ignore
+                    focal_length=row['focal_length'],  # type: ignore
+                    iso=row['iso'],  # type: ignore
+                    aperture=row['aperture'],  # type: ignore
+                    shutter_speed=row['shutter_speed'],  # type: ignore
+                    shutter_speed_decimal=row['shutter_speed_decimal'],  # type: ignore
+                    exposure_program=row['exposure_program'],  # type: ignore
+                    exposure_bias=row['exposure_bias'],  # type: ignore
+                    flash_mode=row['flash_mode'],  # type: ignore
+                    date_taken=datetime.fromisoformat(row['date_taken']) if row['date_taken'] else None,  # type: ignore
+                    date_only=row['date_only'] if 'date_only' in row.keys() else None,  # type: ignore
+                    time_only=row['time_only'] if 'time_only' in row.keys() else None,  # type: ignore
+                    day_of_week=row['day_of_week'] if 'day_of_week' in row.keys() else None,  # type: ignore
+                    file_size=row['file_size'],  # type: ignore
+                    width=row['width'],  # type: ignore
+                    height=row['height'],  # type: ignore
+                    created_at=row['created_at'],  # type: ignore
+                    updated_at=row['updated_at']  # type: ignore
+                ))
+
+        return photos
     
     # ===========================
     # Lens Operations

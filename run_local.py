@@ -640,12 +640,14 @@ def analyze_database():
         group = data.get('group')
         sessions = data.get('sessions')  # List of session names
         filters = data.get('filters', {})  # Metadata filters for drill-down
+        include_photos = bool(data.get('include_photos', True))
         
         print(f"[ANALYZE_DATABASE] Received request:")
         print(f"  Category: {category}")
         print(f"  Group: {group}")
         print(f"  Sessions: {sessions}")
         print(f"  Filters: {filters}")
+        print(f"  Include photos: {include_photos}")
         
         db = DatabaseManager.from_config(CONFIG_PATH)
         analyzer = StatisticsAnalyzer(db)
@@ -710,7 +712,7 @@ def analyze_database():
             print(f"[ANALYZE_DATABASE] Filter details: {photo_filters}")
             
             # Use filtered analysis
-            analysis = analyzer.analyze_with_filters(session_ids, photo_filters)
+            analysis = analyzer.analyze_with_filters(session_ids, photo_filters, include_photos=include_photos)
             
             # Add categories and groups breakdown - always show ALL from database
             conn = db.conn
@@ -761,6 +763,7 @@ def analyze_database():
             analysis_dict['active_filters'] = filters
             analysis_dict['query_category'] = category
             analysis_dict['query_group'] = group
+            analysis_dict['include_photos'] = include_photos
             
             print(f"[ANALYZE_DATABASE] Filtered result: {analysis.total_photos} photos")
             print(f"[ANALYZE_DATABASE] Lens freq: {dict(analysis.lens_freq)}")
@@ -776,7 +779,7 @@ def analyze_database():
         if sessions and len(sessions) > 0:
             # Analyze specific sessions - use analyzer to get full frequency data
             print(f"[ANALYZE_DATABASE] Analyzing {len(session_ids)} sessions")
-            analysis = analyzer.analyze_sessions(session_ids, name="Selected Sessions")
+            analysis = analyzer.analyze_sessions(session_ids, name="Selected Sessions", include_photos=include_photos)
             analysis_dict = analysis.to_dict()
             analysis_dict['scope'] = 'sessions'
             
@@ -952,11 +955,12 @@ def analyze_database():
             analysis.metadata['group_to_category'] = group_to_category
         
         # Convert analysis object to dict if we used analyzer
-        analysis_dict = analysis.to_dict() if hasattr(analysis, 'to_dict') else analysis
+            analysis_dict = analysis.to_dict() if hasattr(analysis, 'to_dict') else analysis
         
         # Add metadata about the query
         analysis_dict['query_category'] = category
         analysis_dict['query_group'] = group
+        analysis_dict['include_photos'] = include_photos
         
         return jsonify({
             'success': True,
@@ -965,6 +969,244 @@ def analyze_database():
         
     except Exception as e:
         logger.error(f"Error in analyze_database: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/analyze/database_faceted', methods=['POST'])
+def analyze_database_faceted():
+    """Analyze database and return faceted counts in a single response."""
+
+    def _resolve_session_ids(conn, category, group, sessions, filters):
+        # Check if category/group come from filters dict (for drill-down filtering)
+        if filters and 'category' in filters:
+            category = filters['category']
+        if filters and 'group' in filters:
+            group = filters['group']
+
+        session_ids = []
+        if sessions and len(sessions) > 0:
+            placeholders = ','.join('?' * len(sessions))
+            session_rows = conn.execute(
+                f"SELECT id FROM sessions WHERE name IN ({placeholders})",
+                sessions
+            ).fetchall()
+            session_ids = [s['id'] for s in session_rows]
+        elif category and group:
+            session_rows = conn.execute(
+                "SELECT id FROM sessions WHERE category = ? AND group_name = ?",
+                (category, group)
+            ).fetchall()
+            session_ids = [s['id'] for s in session_rows]
+        elif category:
+            session_rows = conn.execute(
+                "SELECT id FROM sessions WHERE category = ?",
+                (category,)
+            ).fetchall()
+            session_ids = [s['id'] for s in session_rows]
+        elif group:
+            session_rows = conn.execute(
+                "SELECT id FROM sessions WHERE group_name = ?",
+                (group,)
+            ).fetchall()
+            session_ids = [s['id'] for s in session_rows]
+        else:
+            session_rows = conn.execute("SELECT id FROM sessions").fetchall()
+            session_ids = [s['id'] for s in session_rows]
+
+        return category, group, session_ids
+
+    def _build_baseline_category_group_metadata(conn):
+        all_sessions = conn.execute("SELECT * FROM sessions").fetchall()
+
+        categories = {}
+        for session in all_sessions:
+            cat = session['category'] or 'Uncategorized'
+            if cat not in categories:
+                categories[cat] = {'sessions': 0, 'photos': 0, 'raw_photos': 0, 'hit_rate': None}
+            categories[cat]['sessions'] += 1
+            categories[cat]['photos'] += session['total_photos']
+            if session['total_raw_photos'] is not None:
+                categories[cat]['raw_photos'] += session['total_raw_photos']
+
+        for cat in categories:
+            if categories[cat]['raw_photos'] > 0:
+                categories[cat]['hit_rate'] = (categories[cat]['photos'] / categories[cat]['raw_photos']) * 100
+
+        groups = {}
+        group_to_category = {}
+        for session in all_sessions:
+            grp = session['group_name'] or 'Ungrouped'
+            cat = session['category'] or 'Uncategorized'
+            if grp not in groups:
+                groups[grp] = {'sessions': 0, 'photos': 0, 'category': cat, 'raw_photos': 0, 'hit_rate': None}
+                group_to_category[grp] = cat
+            groups[grp]['sessions'] += 1
+            groups[grp]['photos'] += session['total_photos']
+            if session['total_raw_photos'] is not None:
+                groups[grp]['raw_photos'] += session['total_raw_photos']
+
+        for grp in groups:
+            if groups[grp]['raw_photos'] > 0:
+                groups[grp]['hit_rate'] = (groups[grp]['photos'] / groups[grp]['raw_photos']) * 100
+
+        return categories, groups, group_to_category
+
+    def _overlay_filtered_category_group_counts(base_categories, base_groups, session_info_by_id, filtered_photos):
+        # Start with baseline keys so everything stays visible; then overwrite sessions/photos.
+        categories = {
+            k: {
+                **v,
+                'sessions': 0,
+                'photos': 0,
+            }
+            for k, v in (base_categories or {}).items()
+        }
+        groups = {
+            k: {
+                **v,
+                'sessions': 0,
+                'photos': 0,
+            }
+            for k, v in (base_groups or {}).items()
+        }
+
+        cat_sessions = {}
+        grp_sessions = {}
+
+        for photo in filtered_photos:
+            sinfo = session_info_by_id.get(photo.session_id) or {}
+            cat = sinfo.get('category') or 'Uncategorized'
+            grp = sinfo.get('group') or 'Ungrouped'
+
+            if cat not in categories:
+                categories[cat] = {'sessions': 0, 'photos': 0, 'raw_photos': 0, 'hit_rate': None}
+            if grp not in groups:
+                groups[grp] = {'sessions': 0, 'photos': 0, 'category': cat, 'raw_photos': 0, 'hit_rate': None}
+
+            categories[cat]['photos'] += 1
+            groups[grp]['photos'] += 1
+
+            cat_sessions.setdefault(cat, set()).add(photo.session_id)
+            grp_sessions.setdefault(grp, set()).add(photo.session_id)
+
+        for cat, sess_set in cat_sessions.items():
+            categories[cat]['sessions'] = len(sess_set)
+        for grp, sess_set in grp_sessions.items():
+            groups[grp]['sessions'] = len(sess_set)
+
+        return categories, groups
+
+    try:
+        data = request.get_json() or {}
+        category = data.get('category')
+        group = data.get('group')
+        sessions = data.get('sessions')
+        filters = data.get('filters', {})
+        include_photos = bool(data.get('include_photos', True))
+
+        db = DatabaseManager.from_config(CONFIG_PATH)
+        analyzer = StatisticsAnalyzer(db)
+        conn = db.conn
+
+        # Preload session info for labeling and category/group counting.
+        session_rows = conn.execute("SELECT id, name, category, group_name FROM sessions").fetchall()
+        session_info_by_id = {
+            row['id']: {
+                'name': row['name'],
+                'category': row['category'],
+                'group': row['group_name'],
+            }
+            for row in session_rows
+        }
+
+        session_map_for_photos = {
+            sid: {
+                'name': info.get('name'),
+                'category': info.get('category'),
+                'group': info.get('group'),
+            }
+            for sid, info in session_info_by_id.items()
+        }
+
+        base_categories, base_groups, group_to_category = _build_baseline_category_group_metadata(conn)
+
+        photos_cache = {}
+
+        def _get_photos_for_session_ids(session_ids):
+            cache_key = tuple(sorted(session_ids))
+            if cache_key in photos_cache:
+                return photos_cache[cache_key]
+            photos = db.get_photos_by_sessions(session_ids)
+            photos_cache[cache_key] = photos
+            return photos
+
+        def _run_analysis(filters_for_scope, include_photos_flag):
+            qcat, qgrp, session_ids = _resolve_session_ids(conn, category, group, sessions, filters_for_scope)
+            if not session_ids:
+                raise ValueError('No matching sessions found')
+
+            scope_photos = _get_photos_for_session_ids(session_ids)
+
+            # Remove category/group from photo-level filters since they are session-level.
+            photo_filters = {k: v for k, v in (filters_for_scope or {}).items() if k not in ['category', 'group']}
+
+            analysis_obj, filtered_photos = analyzer.analyze_photos_with_filters_from_photos(
+                scope_photos,
+                photo_filters,
+                name="Filtered Analysis",
+                include_photos=include_photos_flag,
+                session_map=session_map_for_photos,
+            )
+
+            # Overlay filtered category/group counts while keeping all options visible.
+            categories_meta, groups_meta = _overlay_filtered_category_group_counts(
+                base_categories,
+                base_groups,
+                session_info_by_id,
+                filtered_photos,
+            )
+            analysis_obj.metadata['categories'] = categories_meta
+            analysis_obj.metadata['groups'] = groups_meta
+            analysis_obj.metadata['group_to_category'] = group_to_category
+
+            analysis_dict = analysis_obj.to_dict()
+            analysis_dict['filtered'] = bool(filters_for_scope)
+            analysis_dict['active_filters'] = filters_for_scope
+            analysis_dict['query_category'] = qcat
+            analysis_dict['query_group'] = qgrp
+            analysis_dict['include_photos'] = include_photos_flag
+
+            return analysis_dict
+
+        # Main analysis (ALL active filters)
+        main_analysis = _run_analysis(filters, include_photos)
+
+        # If no filters, caller likely doesn't need facets.
+        if not filters or len(filters) == 0:
+            return jsonify({'success': True, 'analysis': main_analysis, 'facets': {}})
+
+        facet_keys = [
+            'category',
+            'group',
+            'camera',
+            'lens',
+            'aperture',
+            'shutter_speed',
+            'iso',
+            'focal_length',
+            'time_of_day',
+        ]
+
+        facets = {}
+        for facet_key in facet_keys:
+            facet_filters = dict(filters)
+            facet_filters.pop(facet_key, None)
+            facets[facet_key] = _run_analysis(facet_filters, include_photos_flag=False)
+
+        return jsonify({'success': True, 'analysis': main_analysis, 'facets': facets})
+
+    except Exception as e:
+        logger.error(f"Error in analyze_database_faceted: {e}", exc_info=True)
         return jsonify({'error': str(e)}), 500
 
 

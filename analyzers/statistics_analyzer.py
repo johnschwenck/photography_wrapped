@@ -88,7 +88,7 @@ class StatisticsAnalyzer:
         
         return analysis
     
-    def analyze_sessions(self, session_ids: List[int], name: str = "Combined Analysis") -> Analysis:
+    def analyze_sessions(self, session_ids: List[int], name: str = "Combined Analysis", include_photos: bool = True) -> Analysis:
         """
         Analyze multiple sessions together.
         
@@ -140,29 +140,30 @@ class StatisticsAnalyzer:
         if total_raw > 0:
             analysis.calculate_aggregated_hit_rate(total_raw)
         
-        # Build photo details array
-        photo_details = []
-        for photo in all_photos:
-            session_info = session_map.get(photo.session_id, {'name': 'Unknown', 'category': None, 'group': None})
-            photo_details.append({
-                'date_taken': photo.date_taken.strftime('%Y-%m-%d') if photo.date_taken else None,
-                'date_only': photo.date_only,
-                'time_only': photo.time_only,
-                'day_of_week': photo.day_of_week,
-                'category': session_info['category'] or 'Uncategorized',
-                'group': session_info['group'] or 'Ungrouped',
-                'session_name': session_info['name'],
-                'camera': photo.camera or 'Unknown',
-                'lens': photo.lens or 'Unknown',
-                'aperture': str(photo.aperture) if photo.aperture else None,
-                'shutter_speed': photo.shutter_speed,
-                'iso': str(photo.iso) if photo.iso else None,
-                'focal_length': str(photo.focal_length) if photo.focal_length else None,
-                'filename': photo.file_name,
-                'file_path': photo.file_path
-            })
-        
-        analysis.photos = photo_details
+        if include_photos:
+            # Build photo details array
+            photo_details = []
+            for photo in all_photos:
+                session_info = session_map.get(photo.session_id, {'name': 'Unknown', 'category': None, 'group': None})
+                photo_details.append({
+                    'date_taken': photo.date_taken.strftime('%Y-%m-%d') if photo.date_taken else None,
+                    'date_only': photo.date_only,
+                    'time_only': photo.time_only,
+                    'day_of_week': photo.day_of_week,
+                    'category': session_info['category'] or 'Uncategorized',
+                    'group': session_info['group'] or 'Ungrouped',
+                    'session_name': session_info['name'],
+                    'camera': photo.camera or 'Unknown',
+                    'lens': photo.lens or 'Unknown',
+                    'aperture': str(photo.aperture) if photo.aperture else None,
+                    'shutter_speed': photo.shutter_speed,
+                    'iso': str(photo.iso) if photo.iso else None,
+                    'focal_length': str(photo.focal_length) if photo.focal_length else None,
+                    'filename': photo.file_name,
+                    'file_path': photo.file_path
+                })
+
+            analysis.photos = photo_details
         
         return analysis
     
@@ -334,7 +335,7 @@ class StatisticsAnalyzer:
         
         return summary
     
-    def analyze_with_filters(self, session_ids: List[int], filters: dict, name: str = "Filtered Analysis") -> Analysis:
+    def analyze_with_filters(self, session_ids: List[int], filters: dict, name: str = "Filtered Analysis", include_photos: bool = True) -> Analysis:
         """
         Analyze photos with metadata filters applied.
         
@@ -364,51 +365,66 @@ class StatisticsAnalyzer:
                 }
         
         # Get all photos from specified sessions
-        all_photos = []
-        for session_id in session_ids:
-            photos = self.db.get_photos_by_session(session_id)
-            all_photos.extend(photos)
-        
-        # Apply filters
-        filtered_photos = all_photos
-        
+        all_photos = self.db.get_photos_by_sessions(session_ids)
+        analysis, _filtered_photos = self.analyze_photos_with_filters_from_photos(
+            all_photos,
+            filters,
+            name=name,
+            include_photos=include_photos,
+            session_map=session_map,
+        )
+
+        return analysis
+
+    def _filter_photos(self, photos: List[Any], filters: dict) -> List[Any]:
+        filtered_photos = photos
+
         if 'camera' in filters:
             filtered_photos = [p for p in filtered_photos if p.camera == filters['camera']]
-        
+
         if 'lens' in filters:
             filtered_photos = [p for p in filtered_photos if p.lens == filters['lens']]
-        
+
         if 'aperture' in filters:
-            # Convert to string for comparison (e.g., "1.4")
             filter_aperture = str(filters['aperture'])
             filtered_photos = [p for p in filtered_photos if p.aperture and str(p.aperture) == filter_aperture]
-        
+
         if 'shutter_speed' in filters:
             filtered_photos = [p for p in filtered_photos if p.shutter_speed == filters['shutter_speed']]
-        
+
         if 'iso' in filters:
-            # Convert to string for comparison
             filter_iso = str(filters['iso'])
             filtered_photos = [p for p in filtered_photos if p.iso and str(p.iso) == filter_iso]
-        
+
         if 'focal_length' in filters:
-            # Convert to float for comparison
             filter_focal = float(filters['focal_length'])
             filtered_photos = [p for p in filtered_photos if p.focal_length and abs(float(p.focal_length) - filter_focal) < 0.1]
-        
+
         if 'time_of_day' in filters:
             filtered_photos = [p for p in filtered_photos if p.time_of_day == filters['time_of_day']]
-        
+
         if 'lens_type' in filters:
-            # Filter by prime or zoom lenses
             if filters['lens_type'] == 'prime':
-                # Prime lenses have fixed focal lengths (no range in name)
                 filtered_photos = [p for p in filtered_photos if p.lens and '-' not in p.lens]
             elif filters['lens_type'] == 'zoom':
-                # Zoom lenses have focal length ranges (contain '-')
                 filtered_photos = [p for p in filtered_photos if p.lens and '-' in p.lens]
-        
-        # Create temporary session-like object with filtered photos
+
+        return filtered_photos
+
+    def analyze_photos_with_filters_from_photos(
+        self,
+        photos: List[Any],
+        filters: dict,
+        name: str = "Filtered Analysis",
+        include_photos: bool = False,
+        session_map: Optional[Dict[int, Dict[str, Any]]] = None,
+    ) -> (Analysis, List[Any]):
+        """Analyze an in-memory photo list with filters applied.
+
+        Returns both the Analysis and the filtered photo list (useful for faceting/metadata).
+        """
+        filtered_photos = self._filter_photos(photos, filters)
+
         from models.session import Session
         temp_session = Session(
             name=name,
@@ -417,36 +433,35 @@ class StatisticsAnalyzer:
         )
         temp_session.photos = filtered_photos
         temp_session.total_photos = len(filtered_photos)
-        
-        # Calculate statistics on filtered photos
+
         stats = temp_session.calculate_statistics()
-        
-        # Create Analysis object
+
         analysis = Analysis(name=name)
         analysis.add_session_stats(stats)
-        
-        # Build photo details array
-        photo_details = []
-        for photo in filtered_photos:
-            session_info = session_map.get(photo.session_id, {'name': 'Unknown', 'category': None, 'group': None})
-            photo_details.append({
-                'date_taken': photo.date_taken.strftime('%Y-%m-%d') if photo.date_taken else None,
-                'date_only': photo.date_only,
-                'time_only': photo.time_only,
-                'day_of_week': photo.day_of_week,
-                'category': session_info['category'] or 'Uncategorized',
-                'group': session_info['group'] or 'Ungrouped',
-                'session_name': session_info['name'],
-                'camera': photo.camera or 'Unknown',
-                'lens': photo.lens or 'Unknown',
-                'aperture': str(photo.aperture) if photo.aperture else None,
-                'shutter_speed': photo.shutter_speed,
-                'iso': str(photo.iso) if photo.iso else None,
-                'focal_length': str(photo.focal_length) if photo.focal_length else None,
-                'filename': photo.file_name,
-                'file_path': photo.file_path
-            })
-        
-        analysis.photos = photo_details
-        
-        return analysis
+
+        if include_photos:
+            photo_details = []
+            smap = session_map or {}
+            for photo in filtered_photos:
+                session_info = smap.get(photo.session_id, {'name': 'Unknown', 'category': None, 'group': None})
+                photo_details.append({
+                    'date_taken': photo.date_taken.strftime('%Y-%m-%d') if photo.date_taken else None,
+                    'date_only': photo.date_only,
+                    'time_only': photo.time_only,
+                    'day_of_week': photo.day_of_week,
+                    'category': session_info['category'] or 'Uncategorized',
+                    'group': session_info['group'] or 'Ungrouped',
+                    'session_name': session_info['name'],
+                    'camera': photo.camera or 'Unknown',
+                    'lens': photo.lens or 'Unknown',
+                    'aperture': str(photo.aperture) if photo.aperture else None,
+                    'shutter_speed': photo.shutter_speed,
+                    'iso': str(photo.iso) if photo.iso else None,
+                    'focal_length': str(photo.focal_length) if photo.focal_length else None,
+                    'filename': photo.file_name,
+                    'file_path': photo.file_path
+                })
+
+            analysis.photos = photo_details
+
+        return analysis, filtered_photos
