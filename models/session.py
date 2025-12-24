@@ -137,6 +137,7 @@ class Session:
             'total_count': self.total_photos,
             'hit_rate': self.hit_rate,
             'lens_freq': Counter(),
+            'camera_freq': Counter(),
             'shutter_speed_freq': Counter(),
             'aperture_freq': Counter(),
             'iso_freq': Counter(),
@@ -144,6 +145,7 @@ class Session:
             'flash_mode_freq': Counter(),
             'focal_length_freq': Counter(),
             'exposure_bias_freq': Counter(),
+            # 'time_of_day_freq': Counter(),  # Not yet implemented in PhotoMetadata
             'lens_breakdowns': {},
             'prime_count': 0,
             'zoom_count': 0,
@@ -157,6 +159,8 @@ class Session:
             # Overall frequency counters
             if photo.lens:
                 stats['lens_freq'][photo.lens] += 1
+            if photo.camera:
+                stats['camera_freq'][photo.camera] += 1
             if photo.shutter_speed:
                 stats['shutter_speed_freq'][photo.shutter_speed] += 1
             if photo.aperture:
@@ -171,6 +175,7 @@ class Session:
                 stats['focal_length_freq'][photo.focal_length] += 1
             if photo.exposure_bias:
                 stats['exposure_bias_freq'][photo.exposure_bias] += 1
+            # Note: time_of_day not available in PhotoMetadata model yet
             
             # Lens-specific breakdown
             if photo.lens:

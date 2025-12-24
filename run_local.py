@@ -702,9 +702,45 @@ def analyze_database():
             
             # Use filtered analysis
             analysis = analyzer.analyze_with_filters(session_ids, filters)
+            
+            # Add categories and groups breakdown for filtered results
+            conn = db.conn
+            if session_ids:
+                placeholders = ','.join('?' * len(session_ids))
+                filtered_sessions = conn.execute(
+                    f"SELECT * FROM sessions WHERE id IN ({placeholders})",
+                    session_ids
+                ).fetchall()
+                
+                # Get category breakdown
+                categories = {}
+                for session in filtered_sessions:
+                    cat = session['category'] or 'Uncategorized'
+                    if cat not in categories:
+                        categories[cat] = {'sessions': 0, 'photos': 0}
+                    categories[cat]['sessions'] += 1
+                    categories[cat]['photos'] += session['total_photos']
+                
+                # Get group breakdown
+                groups = {}
+                for session in filtered_sessions:
+                    grp = session['group_name'] or 'Ungrouped'
+                    if grp not in groups:
+                        groups[grp] = {'sessions': 0, 'photos': 0}
+                    groups[grp]['sessions'] += 1
+                    groups[grp]['photos'] += session['total_photos']
+                
+                # Only add if there are multiple categories/groups (otherwise it's redundant)
+                if len(categories) > 1 or not category:
+                    analysis.metadata['categories'] = categories
+                if len(groups) > 1 or not group:
+                    analysis.metadata['groups'] = groups
+            
             analysis_dict = analysis.to_dict()
             analysis_dict['filtered'] = True
             analysis_dict['active_filters'] = filters
+            analysis_dict['query_category'] = category
+            analysis_dict['query_group'] = group
             
             print(f"[ANALYZE_DATABASE] Filtered result: {analysis.total_photos} photos")
             print(f"[ANALYZE_DATABASE] Lens freq: {dict(analysis.lens_freq)}")
