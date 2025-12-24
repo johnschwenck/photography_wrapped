@@ -511,15 +511,17 @@ class DatabaseManager:
                     session_id, lens_id, file_path, file_name, camera, lens_name,
                     focal_length, iso, aperture, shutter_speed, shutter_speed_decimal,
                     exposure_program, exposure_bias, flash_mode, date_taken,
+                    date_only, time_only, day_of_week,
                     file_size, width, height
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 photo.session_id, lens_id, photo.file_path, photo.file_name,
                 photo.camera, photo.lens, photo.focal_length, photo.iso,
                 photo.aperture, photo.shutter_speed, photo.shutter_speed_decimal,
                 photo.exposure_program, photo.exposure_bias, photo.flash_mode,
-                photo.date_taken, photo.file_size, photo.width, photo.height
+                photo.date_taken, photo.date_only, photo.time_only, photo.day_of_week,
+                photo.file_size, photo.width, photo.height
             ))
             
             photo.id = cursor.lastrowid
@@ -552,6 +554,14 @@ class DatabaseManager:
                     exposure_bias=row['exposure_bias'],  # type: ignore
                     flash_mode=row['flash_mode'],  # type: ignore
                     date_taken=datetime.fromisoformat(row['date_taken']) if row['date_taken'] else None,  # type: ignore
+                    date_only=row['date_only'] if 'date_only' in row.keys() else None,  # type: ignore
+                    time_only=row['time_only'] if 'time_only' in row.keys() else None,  # type: ignore
+                    day_of_week=row['day_of_week'] if 'day_of_week' in row.keys() else None,  # type: ignore
+                    file_size=row['file_size'],  # type: ignore
+                    width=row['width'],  # type: ignore
+                    height=row['height'],  # type: ignore
+                    created_at=row['created_at'],  # type: ignore
+                    updated_at=row['updated_at']  # type: ignore
                 ))
         
         return photos

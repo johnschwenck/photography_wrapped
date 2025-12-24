@@ -107,6 +107,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
             button.classList.add('active');
             document.getElementById(`${tabId}-tab`).classList.add('active');
+
+            // Auto-run analysis when Analysis tab is opened for the first time
+            if (tabId === 'analyze' && !currentAnalysisData) {
+                runDatabaseAnalysis();
+            }
         });
     });
 
@@ -183,15 +188,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Analysis tab functionality
     document.getElementById('run-analysis-btn').addEventListener('click', runDatabaseAnalysis);
-    document.getElementById('analysis-category-filter').addEventListener('change', updateAnalysisFilterInfo);
-    document.getElementById('analysis-group-filter').addEventListener('change', updateAnalysisFilterInfo);
-    document.getElementById('select-all-sessions').addEventListener('click', () => selectAllSessions(true));
-    document.getElementById('deselect-all-sessions').addEventListener('click', () => selectAllSessions(false));
-    
-    // Load analysis filters when tab is clicked
-    document.querySelector('[data-tab="analyze"]').addEventListener('click', () => {
-        setTimeout(() => loadAnalysisFilters(), 100);
-    });
 
     // Database tab functionality
     document.getElementById('refresh-db-btn').addEventListener('click', loadDatabaseOverview);
@@ -786,185 +782,13 @@ let categoryGroupMap = {};
 let allSessions = [];
 let previousCategory = '';  // Track previous category selection
 
-async function loadAnalysisFilters() {
-    try {
-        const response = await fetch(`${API_BASE}/database/categories-groups`);
-        const data = await response.json();
-        
-        if (!response.ok || !data.success) return;
-        
-        allCategories = data.categories;
-        allGroups = data.groups;
-        
-        // Build category-group mapping and load all sessions
-        const dbResponse = await fetch(`${API_BASE}/database/overview`);
-        const dbData = await dbResponse.json();
-        if (dbResponse.ok && dbData.success) {
-            categoryGroupMap = {};
-            allSessions = dbData.sessions;
-            
-            dbData.sessions.forEach(session => {
-                const cat = session.category || '';
-                const grp = session.group || '';
-                if (!categoryGroupMap[cat]) categoryGroupMap[cat] = new Set();
-                if (grp) categoryGroupMap[cat].add(grp);
-            });
-        }
-        
-        // Populate category filter
-        const categoryFilter = document.getElementById('analysis-category-filter');
-        categoryFilter.innerHTML = '<option value="">All Categories</option>';
-        allCategories.forEach(cat => {
-            categoryFilter.innerHTML += `<option value="${escapeHtml(cat)}">${escapeHtml(cat)}</option>`;
-        });
-        
-        // Populate group filter (all groups initially)
-        updateGroupFilter();
-        
-        // Show filter info
-        updateAnalysisFilterInfo();
-        
-    } catch (error) {
-        console.error('Error loading analysis filters:', error);
-    }
-}
-
-function updateGroupFilter() {
-    const categoryFilter = document.getElementById('analysis-category-filter');
-    const groupFilter = document.getElementById('analysis-group-filter');
-    const selectedCategory = categoryFilter.value;
-    const currentGroupValue = groupFilter.value;  // Save current selection
-    
-    console.log('Updating group filter for category:', selectedCategory);
-    
-    groupFilter.innerHTML = '<option value="">All Groups</option>';
-    
-    if (selectedCategory && categoryGroupMap[selectedCategory]) {
-        // Show only groups in selected category
-        const groupsInCategory = Array.from(categoryGroupMap[selectedCategory]).sort();
-        console.log('Groups in category:', groupsInCategory);
-        groupsInCategory.forEach(grp => {
-            groupFilter.innerHTML += `<option value="${escapeHtml(grp)}">${escapeHtml(grp)}</option>`;
-        });
-        
-        // Try to restore previous selection if it's still valid
-        if (currentGroupValue && groupsInCategory.includes(currentGroupValue)) {
-            groupFilter.value = currentGroupValue;
-        }
-    } else {
-        // Show all groups
-        allGroups.forEach(grp => {
-            groupFilter.innerHTML += `<option value="${escapeHtml(grp)}">${escapeHtml(grp)}</option>`;
-        });
-        
-        // Reset to "All Groups" if we just switched FROM a category TO "All Categories"
-        if (previousCategory && !selectedCategory) {
-            groupFilter.value = '';
-        } else if (currentGroupValue && allGroups.includes(currentGroupValue)) {
-            // Otherwise preserve the selection
-            groupFilter.value = currentGroupValue;
-        }
-    }
-    
-    // Update tracking
-    previousCategory = selectedCategory;
-    
-    console.log('Group filter updated, options count:', groupFilter.options.length);
-}
-
-function updateAnalysisFilterInfo() {
-    const categoryFilter = document.getElementById('analysis-category-filter');
-    const groupFilter = document.getElementById('analysis-group-filter');
-    const filterInfo = document.getElementById('analysis-filter-info');
-    const sessionContainer = document.getElementById('session-filter-container');
-    
-    // Update group dropdown based on category selection
-    updateGroupFilter();
-    
-    const category = categoryFilter.value;
-    const group = groupFilter.value;
-    
-    // Show/hide session filter based on group selection
-    if (group) {
-        updateSessionFilter(category, group);
-        sessionContainer.style.display = 'block';
-    } else {
-        sessionContainer.style.display = 'none';
-    }
-    
-    // Update filter info text
-    if (!category && !group) {
-        filterInfo.textContent = 'Analyzing entire database';
-    } else {
-        let parts = [];
-        if (category) parts.push(`Category: ${category}`);
-        if (group) parts.push(`Group: ${group}`);
-        
-        const sessionFilter = document.getElementById('analysis-session-filter');
-        const selectedSessions = Array.from(sessionFilter.selectedOptions).map(opt => opt.value);
-        if (group && sessionFilter.options.length > 0) {
-            if (selectedSessions.length === 0) {
-                parts.push('all sessions');
-            } else if (selectedSessions.length < sessionFilter.options.length) {
-                parts.push(`${selectedSessions.length} sessions`);
-            }
-        }
-        
-        filterInfo.textContent = `Filtered by ${parts.join(', ')}`;
-    }
-}
-
-function updateSessionFilter(category, group) {
-    const sessionFilter = document.getElementById('analysis-session-filter');
-    
-    // Filter sessions by category and group
-    const filteredSessions = allSessions.filter(session => {
-        const matchesCategory = !category || session.category === category;
-        const matchesGroup = !group || session.group === group;
-        return matchesCategory && matchesGroup;
-    });
-    
-    // Populate session dropdown (nothing selected by default - means "All Sessions")
-    sessionFilter.innerHTML = '';
-    filteredSessions.forEach(session => {
-        const option = document.createElement('option');
-        option.value = session.name;
-        option.textContent = `${session.name} (${session.total_photos} photos)`;
-        option.selected = false;  // Nothing selected = analyze all sessions
-        sessionFilter.appendChild(option);
-    });
-    
-    console.log('Session filter updated:', filteredSessions.length, 'sessions');
-}
-
-function selectAllSessions(select) {
-    const sessionFilter = document.getElementById('analysis-session-filter');
-    Array.from(sessionFilter.options).forEach(option => {
-        option.selected = select;
-    });
-    updateAnalysisFilterInfo();
-}
-
 async function runDatabaseAnalysis() {
-    const categoryFilter = document.getElementById('analysis-category-filter');
-    const groupFilter = document.getElementById('analysis-group-filter');
-    const sessionFilter = document.getElementById('analysis-session-filter');
     const resultsArea = document.getElementById('analyze-results');
     const progressBar = document.getElementById('progress-bar');
     
-    const category = categoryFilter.value || null;
-    const group = groupFilter.value || null;
-    
-    // Get selected sessions if any are specifically selected
-    // If none selected, sessions = null means "analyze all sessions in group"
-    let sessions = null;
-    if (group && sessionFilter.options.length > 0) {
-        const selected = Array.from(sessionFilter.selectedOptions).map(opt => opt.value);
-        if (selected.length > 0) {
-            sessions = selected;
-        }
-        // If no sessions selected, sessions stays null = analyze entire group
-    }
+    // Clear any existing filters - start fresh with full database analysis
+    activeFilters = {};
+    currentAnalysisData = null;
     
     resultsArea.innerHTML = '';
     progressBar.style.display = 'block';
@@ -974,7 +798,7 @@ async function runDatabaseAnalysis() {
         const response = await fetch(`${API_BASE}/analyze/database`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ category, group, sessions })
+            body: JSON.stringify({ })
         });
         
         updateProgressBar(50, 'Processing data...');
@@ -989,6 +813,9 @@ async function runDatabaseAnalysis() {
         
         updateProgressBar(100, 'Complete');
         setTimeout(() => { progressBar.style.display = 'none'; }, 500);
+        
+        // Store the full analysis data for filtering
+        currentAnalysisData = data.analysis;
         
         // Log for debugging
         console.log('Analysis response:', data);
@@ -1574,8 +1401,9 @@ let chartInstances = [];
 let currentAnalysisData = null; // Store the full analysis data
 let activeFilters = {}; // Store active filters { filterType: value }
 let activeLensType = 'all'; // Track lens type filter: 'all', 'prime', or 'zoom'
+let expandedSections = {}; // Track which sections are expanded
 
-function createHistogramChart(canvasId, labels, data, chartTitle, xAxisLabel, color, filterType, rawValues) {
+function createHistogramChart(canvasId, labels, data, chartTitle, xAxisLabel, color, filterType, rawValues, isPercentage = false, hitRateMetadata = null) {
     // Destroy existing chart if it exists
     const existingChart = chartInstances.find(c => c && c.canvas && c.canvas.id === canvasId);
     if (existingChart) {
@@ -1646,10 +1474,33 @@ function createHistogramChart(canvasId, labels, data, chartTitle, xAxisLabel, co
                     padding: 10,
                     displayColors: false,
                     callbacks: {
+                        title: function(context) {
+                            // For hit rate charts, show the category/group name in title
+                            if (hitRateMetadata && hitRateMetadata[context[0].dataIndex]) {
+                                const itemName = hitRateMetadata[context[0].dataIndex].name;
+                                const itemType = hitRateMetadata[context[0].dataIndex].type;
+                                return `${itemType}: ${itemName}`;
+                            }
+                            return context[0].label;
+                        },
                         label: function(context) {
-                            const count = context.parsed.y;
-                            const percentage = ((count / total) * 100).toFixed(1);
-                            return `Photos: ${count} (${percentage}%)`;
+                            const value = context.parsed.y;
+                            if (isPercentage && hitRateMetadata && hitRateMetadata[context.dataIndex]) {
+                                // For hit rate charts, show detailed breakdown
+                                const meta = hitRateMetadata[context.dataIndex];
+                                return [
+                                    `Final Edits: ${meta.finalEdits}`,
+                                    `Total Photos: ${meta.totalPhotos}`,
+                                    `Hit Rate: ${value.toFixed(1)}%`
+                                ];
+                            } else if (isPercentage) {
+                                // For hit rate charts without metadata
+                                return `Hit Rate: ${value.toFixed(1)}%`;
+                            } else {
+                                // For count charts, calculate percentage
+                                const percentage = ((value / total) * 100).toFixed(1);
+                                return `Photos: ${value} (${percentage}%)`;
+                            }
                         }
                     }
                 }
@@ -1814,34 +1665,17 @@ async function applyFiltersAndRedraw() {
     // Show active filters to user
     displayActiveFilters();
     
-    // Fetch filtered data from backend
-    const categoryFilter = document.getElementById('analysis-category-filter');
-    const groupFilter = document.getElementById('analysis-group-filter');
-    const sessionFilter = document.getElementById('analysis-session-filter');
-    
-    const category = categoryFilter ? categoryFilter.value || null : null;
-    const group = groupFilter ? groupFilter.value || null : null;
-    let sessions = null;
-    if (group && sessionFilter && sessionFilter.options.length > 0) {
-        const selected = Array.from(sessionFilter.selectedOptions).map(opt => opt.value);
-        if (selected.length > 0) {
-            sessions = selected;
-        }
-    }
-    
+    // Fetch filtered data from backend - no dropdown filters, only activeFilters from clicking
     try {
         const response = await fetch(`${API_BASE}/analyze/database`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ 
-                category, 
-                group, 
-                sessions,
                 filters: activeFilters // Send active filters to backend
             })
         });
         
-        console.log('Filter request sent:', { category, group, sessions, filters: activeFilters });
+        console.log('Filter request sent:', { filters: activeFilters });
         
         const data = await response.json();
         
@@ -1876,7 +1710,9 @@ function displayActiveFilters() {
             'shutter_speed': 'Shutter Speed',
             'iso': 'ISO',
             'focal_length': 'Focal Length',
-            'time_of_day': 'Time of Day'
+            'time_of_day': 'Time of Day',
+            'category': 'Category',
+            'group': 'Group'
         };
         
         const badges = Object.entries(activeFilters).map(([type, value]) => {
@@ -1935,6 +1771,25 @@ window.clearAllFilters = function() {
     }
     
     applyFiltersAndRedraw();
+}
+
+// Toggle section visibility (for collapsible sections)
+window.toggleSection = function(sectionId) {
+    const content = document.getElementById(sectionId);
+    const arrowId = sectionId.replace('-content', '-arrow');
+    const arrow = document.getElementById(arrowId);
+    
+    if (content) {
+        if (content.style.display === 'none') {
+            content.style.display = 'block';
+            if (arrow) arrow.style.transform = 'rotate(180deg)';
+            expandedSections[sectionId] = true;
+        } else {
+            content.style.display = 'none';
+            if (arrow) arrow.style.transform = 'rotate(0deg)';
+            expandedSections[sectionId] = false;
+        }
+    }
 }
 
 // Toggle lens type filter
@@ -2070,34 +1925,198 @@ function displayAnalysisResults(analysis) {
         </div>
     `;
     
-    // Show categories breakdown for "All Data" view
-    if (!analysis.query_category && !analysis.query_group && analysis.metadata && analysis.metadata.categories) {
+    // Show categories breakdown (always show if metadata exists)
+    if (analysis.metadata && analysis.metadata.categories) {
         html += '<div class="result-card"><h3>Categories</h3>';
         html += '<div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 10px;">';
         const sortedCats = Object.entries(analysis.metadata.categories)
             .sort((a, b) => b[1].photos - a[1].photos);
+        
+        // Determine which category to highlight
+        let highlightCategory = activeFilters.category;
+        // If a group is selected but no category, highlight the group's parent category
+        if (!highlightCategory && activeFilters.group && analysis.metadata.group_to_category) {
+            highlightCategory = analysis.metadata.group_to_category[activeFilters.group];
+        }
+        
         sortedCats.forEach(([cat, data]) => {
-            html += `<p style="margin: 0;"><strong>${escapeHtml(cat)}:</strong> ${data.sessions} sessions, ${data.photos.toLocaleString()} photos</p>`;
+            const isActive = highlightCategory === cat;
+            const activeStyle = isActive ? 'border: 2px solid rgba(59, 130, 246, 0.9); background-color: rgba(59, 130, 246, 0.15);' : 'border: 2px solid transparent;';
+            html += `<p class="clickable-category" data-category="${escapeHtml(cat)}" style="margin: 0; cursor: pointer; padding: 5px; border-radius: 8px; transition: all 0.2s; ${activeStyle}"><strong>${escapeHtml(cat)}:</strong> ${data.sessions} sessions, ${data.photos.toLocaleString()} photos</p>`;
         });
         html += '</div></div>';
     }
     
-    // Show groups breakdown for category selection or "All Data" view
+    // Hit Rate by Category - always use currentAnalysisData for full metadata
+    if (currentAnalysisData && currentAnalysisData.metadata && currentAnalysisData.metadata.categories) {
+        const categoriesWithHitRate = Object.entries(currentAnalysisData.metadata.categories)
+            .filter(([cat, data]) => data.hit_rate !== null && data.hit_rate !== undefined);
+        
+        if (categoriesWithHitRate.length > 0) {
+            const chartId = 'chart-category-hitrate';
+            const sectionId = 'category-hitrate-content';
+            const isExpanded = expandedSections[sectionId] || false;
+            const displayStyle = isExpanded ? 'block' : 'none';
+            const arrowRotation = isExpanded ? 'rotate(180deg)' : 'rotate(0deg)';
+            html += `<div class="result-card">
+                <h3 style="cursor: pointer; user-select: none; display: flex; align-items: center; gap: 10px;" onclick="toggleSection('${sectionId}')">
+                    <span id="category-hitrate-arrow" style="transition: transform 0.3s; transform: ${arrowRotation};">▼</span>
+                    Hit Rate by Category
+                </h3>
+                <div id="${sectionId}" style="display: ${displayStyle};">
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; align-items: start;">
+                        <div style="max-height: 400px; overflow-y: auto;">`;
+            const sortedCategoryHitRates = categoriesWithHitRate.sort((a, b) => b[1].hit_rate - a[1].hit_rate);
+            
+            sortedCategoryHitRates.forEach(([cat, data]) => {
+                html += `<p><strong>${escapeHtml(cat)}:</strong> ${data.hit_rate.toFixed(1)}% (${data.photos} / ${data.raw_photos})</p>`;
+            });
+            html += `</div><div><canvas id="${chartId}" style="height: 350px;"></canvas></div></div></div></div>`;
+        }
+    }
+    
+    // Show groups breakdown - filter by category if one is selected
     if (analysis.metadata && analysis.metadata.groups) {
         html += '<div class="result-card"><h3>Groups</h3>';
         html += '<div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 10px;">';
-        const sortedGroups = Object.entries(analysis.metadata.groups)
-            .sort((a, b) => b[1].photos - a[1].photos);
+        
+        // Filter groups by selected category
+        let filteredGroups = Object.entries(analysis.metadata.groups);
+        if (activeFilters.category) {
+            filteredGroups = filteredGroups.filter(([grp, data]) => data.category === activeFilters.category);
+        }
+        
+        const sortedGroups = filteredGroups.sort((a, b) => b[1].photos - a[1].photos);
         sortedGroups.forEach(([grp, data]) => {
-            html += `<p style="margin: 0;"><strong>${escapeHtml(grp)}:</strong> ${data.sessions} sessions, ${data.photos.toLocaleString()} photos</p>`;
+            const isActive = activeFilters.group === grp;
+            const activeStyle = isActive ? 'border: 2px solid rgba(59, 130, 246, 0.9); background-color: rgba(59, 130, 246, 0.15);' : 'border: 2px solid transparent;';
+            html += `<p class="clickable-group" data-group="${escapeHtml(grp)}" style="margin: 0; cursor: pointer; padding: 5px; border-radius: 8px; transition: all 0.2s; ${activeStyle}"><strong>${escapeHtml(grp)}:</strong> ${data.sessions} sessions, ${data.photos.toLocaleString()} photos</p>`;
         });
         html += '</div></div>';
+    }
+    
+    // Hit Rate by Group - always use currentAnalysisData for full metadata
+    if (currentAnalysisData && currentAnalysisData.metadata && currentAnalysisData.metadata.groups) {
+        // Filter groups by selected category if one is active
+        let filteredGroups = Object.entries(currentAnalysisData.metadata.groups);
+        if (activeFilters.category) {
+            filteredGroups = filteredGroups.filter(([grp, data]) => data.category === activeFilters.category);
+        }
+        
+        const groupsWithHitRate = filteredGroups.filter(([grp, data]) => data.hit_rate !== null && data.hit_rate !== undefined);
+        
+        if (groupsWithHitRate.length > 0) {
+            const chartId = 'chart-group-hitrate';
+            const sectionId = 'group-hitrate-content';
+            const isExpanded = expandedSections[sectionId] || false;
+            const displayStyle = isExpanded ? 'block' : 'none';
+            const arrowRotation = isExpanded ? 'rotate(180deg)' : 'rotate(0deg)';
+            html += `<div class="result-card">
+                <h3 style="cursor: pointer; user-select: none; display: flex; align-items: center; gap: 10px;" onclick="toggleSection('${sectionId}')">
+                    <span id="group-hitrate-arrow" style="transition: transform 0.3s; transform: ${arrowRotation};">▼</span>
+                    Hit Rate by Group${activeFilters.category ? ' - ' + activeFilters.category.charAt(0).toUpperCase() + activeFilters.category.slice(1) : ''}
+                </h3>
+                <div id="${sectionId}" style="display: ${displayStyle};">
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; align-items: start;">
+                        <div style="max-height: 400px; overflow-y: auto;">`;
+            const sortedGroupHitRates = groupsWithHitRate.sort((a, b) => b[1].hit_rate - a[1].hit_rate);
+            
+            sortedGroupHitRates.forEach(([grp, data]) => {
+                html += `<p><strong>${escapeHtml(grp)}:</strong> ${data.hit_rate.toFixed(1)}% (${data.photos} / ${data.raw_photos})</p>`;
+            });
+            html += `</div><div><canvas id="${chartId}" style="height: 350px;"></canvas></div></div></div></div>`;
+        }
+    }
+
+    // Photo Details Section - show actual photo data
+    console.log('[PHOTO_DETAILS] analysis.photos:', analysis.photos);
+    console.log('[PHOTO_DETAILS] photos length:', analysis.photos ? analysis.photos.length : 'undefined');
+    console.log('[PHOTO_DETAILS] activeFilters:', activeFilters);
+    
+    if (analysis.photos !== undefined) {
+        console.log('[PHOTO_DETAILS] Rendering photo details section');
+        
+        let filterDescription = '';
+        const activeFiltersList = [];
+        if (activeFilters.camera) activeFiltersList.push(`Camera: ${activeFilters.camera}`);
+        if (activeFilters.lens) activeFiltersList.push(`Lens: ${activeFilters.lens}`);
+        if (activeFilters.aperture) activeFiltersList.push(`Aperture: f/${activeFilters.aperture}`);
+        if (activeFilters.shutter_speed) activeFiltersList.push(`Shutter: ${activeFilters.shutter_speed}s`);
+        if (activeFilters.iso) activeFiltersList.push(`ISO: ${activeFilters.iso}`);
+        if (activeFilters.focal_length) activeFiltersList.push(`Focal Length: ${activeFilters.focal_length}mm`);
+        
+        if (activeFiltersList.length > 0) {
+            filterDescription = ` - Filtered (${activeFiltersList.join(', ')})`;
+        }
+        
+        const photoCount = analysis.photos ? analysis.photos.length : 0;
+        
+        html += `<div class="result-card">
+            <h3>Photo Details (${photoCount.toLocaleString()} photos)${filterDescription}</h3>
+            <div>`;
+        
+        if (analysis.photos && analysis.photos.length > 0) {
+            html += `
+                <div style="max-height: 400px; overflow-y: auto;">
+                    <table style="width: 100%; border-collapse: collapse; font-size: 0.9em;">
+                        <thead style="position: sticky; top: 0; background: var(--surface); z-index: 1;">
+                            <tr style="border-bottom: 1px solid rgba(255, 255, 255, 0.1);">
+                                <th style="padding: 8px; text-align: left;">Date</th>
+                                <th style="padding: 8px; text-align: left;">Day</th>
+                                <th style="padding: 8px; text-align: left;">Time</th>
+                                <th style="padding: 8px; text-align: left;">Category</th>
+                                <th style="padding: 8px; text-align: left;">Group</th>
+                                <th style="padding: 8px; text-align: left;">Session</th>
+                                <th style="padding: 8px; text-align: left;">Camera</th>
+                                <th style="padding: 8px; text-align: left;">Lens</th>
+                                <th style="padding: 8px; text-align: center;">Aperture</th>
+                                <th style="padding: 8px; text-align: center;">SS</th>
+                                <th style="padding: 8px; text-align: center;">ISO</th>
+                                <th style="padding: 8px; text-align: center;">Focal Length</th>
+                                <th style="padding: 8px; text-align: left;">Filename</th>
+                                <th style="padding: 8px; text-align: left;">Path</th>
+                            </tr>
+                        </thead>
+                        <tbody>`;
+            
+            analysis.photos.forEach((photo, index) => {
+                const rowStyle = index % 2 === 0 ? 'background: rgba(255, 255, 255, 0.02);' : '';
+                html += `
+                            <tr style="${rowStyle}">
+                                <td style="padding: 8px;">${escapeHtml(photo.date_only || 'N/A')}</td>
+                                <td style="padding: 8px;">${escapeHtml(photo.day_of_week || 'N/A')}</td>
+                                <td style="padding: 8px;">${escapeHtml(photo.time_only || 'N/A')}</td>
+                                <td style="padding: 8px;">${escapeHtml(photo.category || 'Uncategorized')}</td>
+                                <td style="padding: 8px;">${escapeHtml(photo.group || 'Ungrouped')}</td>
+                                <td style="padding: 8px;">${escapeHtml(photo.session_name || 'N/A')}</td>
+                                <td style="padding: 8px;">${escapeHtml(photo.camera || 'Unknown')}</td>
+                                <td style="padding: 8px;">${escapeHtml(photo.lens || 'Unknown')}</td>
+                                <td style="padding: 8px; text-align: center;">${photo.aperture ? 'f/' + photo.aperture : 'N/A'}</td>
+                                <td style="padding: 8px; text-align: center;">${photo.shutter_speed || 'N/A'}</td>
+                                <td style="padding: 8px; text-align: center;">${photo.iso || 'N/A'}</td>
+                                <td style="padding: 8px; text-align: center;">${photo.focal_length ? photo.focal_length + 'mm' : 'N/A'}</td>
+                                <td style="padding: 8px;">${escapeHtml(photo.filename || 'N/A')}</td>
+                                <td style="padding: 8px; font-size: 0.85em; color: #9ca3af;">${escapeHtml(photo.file_path || 'N/A')}</td>
+                            </tr>`;
+            });
+            
+            html += `
+                        </tbody>
+                    </table>
+                </div>`;
+        } else {
+            html += `<p style="padding: 10px; color: #9ca3af;">No photos match the current filters.</p>`;
+        }
+        
+        html += `
+            </div>
+        </div>`;
     }
 
     // Camera Bodies
     if (analysis.camera_freq && Object.keys(analysis.camera_freq).length > 0) {
         const chartId = 'chart-cameras';
-        html += `<div class="result-card"><h3>Camera Bodies</h3><div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; align-items: start;"><div>`;
+        html += `<div class="result-card"><h3>Camera Bodies</h3><div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; align-items: start;"><div style="max-height: 400px; overflow-y: auto;">`;
         const cameras = Object.entries(analysis.camera_freq)
             .sort((a, b) => b[1] - a[1]);
         
@@ -2120,7 +2139,7 @@ function displayAnalysisResults(analysis) {
                     <button id="btn-zoom" onclick="toggleLensType('zoom')" style="padding: 8px 16px; background: rgba(75, 85, 99, 0.5); color: #9ca3af; border: none; border-radius: 3px; cursor: pointer; font-size: 0.9em; font-weight: bold;">Zoom</button>
                 </div>
             </div>
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; align-items: start;"><div>`;
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; align-items: start;"><div style="max-height: 400px; overflow-y: auto;">`;
         const lenses = Object.entries(analysis.lens_freq)
             .sort((a, b) => a[0].localeCompare(b[0])); // Alphabetical order
         
@@ -2134,7 +2153,7 @@ function displayAnalysisResults(analysis) {
     // Aperture Stats
     if (analysis.aperture_freq && Object.keys(analysis.aperture_freq).length > 0) {
         const chartId = 'chart-apertures';
-        html += `<div class="result-card"><h3>Aperture Settings</h3><div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; align-items: start;"><div>`;
+        html += `<div class="result-card"><h3>Aperture Settings</h3><div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; align-items: start;"><div style="max-height: 400px; overflow-y: auto;">`;
         const apertures = Object.entries(analysis.aperture_freq)
             .sort((a, b) => {
                 const aNum = parseFloat(a[0]);
@@ -2152,7 +2171,7 @@ function displayAnalysisResults(analysis) {
     // Shutter Speed Stats
     if (analysis.shutter_speed_freq && Object.keys(analysis.shutter_speed_freq).length > 0) {
         const chartId = 'chart-shutters';
-        html += `<div class="result-card"><h3>Shutter Speeds</h3><div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; align-items: start;"><div>`;
+        html += `<div class="result-card"><h3>Shutter Speeds</h3><div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; align-items: start;"><div style="max-height: 400px; overflow-y: auto;">`;
         const parseShutterSpeed = (speed) => {
             if (speed.includes('/')) {
                 const [num, denom] = speed.split('/').map(Number);
@@ -2173,7 +2192,7 @@ function displayAnalysisResults(analysis) {
     // ISO Stats
     if (analysis.iso_freq && Object.keys(analysis.iso_freq).length > 0) {
         const chartId = 'chart-isos';
-        html += `<div class="result-card"><h3>ISO Settings</h3><div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; align-items: start;"><div>`;
+        html += `<div class="result-card"><h3>ISO Settings</h3><div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; align-items: start;"><div style="max-height: 400px; overflow-y: auto;">`;
         const isos = Object.entries(analysis.iso_freq)
             .sort((a, b) => parseInt(a[0]) - parseInt(b[0])); // Ascending order (smallest to largest)
         
@@ -2214,7 +2233,7 @@ function displayAnalysisResults(analysis) {
         // Display primes
         if (Object.keys(primes).length > 0 && showPrimes) {
             const chartId = 'chart-primes';
-            html += `<div class="result-card"><h3>Prime Focal Lengths</h3><div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; align-items: start;"><div>`;
+            html += `<div class="result-card"><h3>Prime Focal Lengths</h3><div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; align-items: start;"><div style="max-height: 400px; overflow-y: auto;">`;
             const sortedPrimes = Object.entries(primes)
                 .sort((a, b) => parseFloat(a[0]) - parseFloat(b[0]));
             
@@ -2229,7 +2248,7 @@ function displayAnalysisResults(analysis) {
         // Display zoom ranges
         if (Object.keys(zoomBuckets).length > 0 && showZooms) {
             const chartId = 'chart-zooms';
-            html += `<div class="result-card"><h3>Zoom Focal Lengths (10mm buckets)</h3><div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; align-items: start;"><div>`;
+            html += `<div class="result-card"><h3>Zoom Focal Lengths (10mm buckets)</h3><div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; align-items: start;"><div style="max-height: 400px; overflow-y: auto;">`;
             const sortedZooms = Object.entries(zoomBuckets)
                 .sort((a, b) => {
                     const aStart = parseInt(a[0].split('-')[0]);
@@ -2247,7 +2266,7 @@ function displayAnalysisResults(analysis) {
     // Time of Day
     if (analysis.time_of_day_freq && Object.keys(analysis.time_of_day_freq).length > 0) {
         const chartId = 'chart-timeofday';
-        html += `<div class="result-card"><h3>Time of Day</h3><div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; align-items: start;"><div>`;
+        html += `<div class="result-card"><h3>Time of Day</h3><div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; align-items: start;"><div style="max-height: 400px; overflow-y: auto;">`;
         const times = Object.entries(analysis.time_of_day_freq)
             .sort((a, b) => b[1] - a[1]);
         
@@ -2274,6 +2293,76 @@ function displayAnalysisResults(analysis) {
     
     // Render all charts after HTML is inserted
     setTimeout(() => {
+        // Category Hit Rate Chart - use currentAnalysisData for full metadata
+        if (currentAnalysisData && currentAnalysisData.metadata && currentAnalysisData.metadata.categories) {
+            const categoriesWithHitRate = Object.entries(currentAnalysisData.metadata.categories)
+                .filter(([cat, data]) => data.hit_rate !== null && data.hit_rate !== undefined);
+            
+            if (categoriesWithHitRate.length > 0) {
+                const sortedCategoryHitRates = categoriesWithHitRate.sort((a, b) => b[1].hit_rate - a[1].hit_rate);
+                const categoryHitRateMetadata = sortedCategoryHitRates.map(([cat, data]) => ({
+                    name: cat,
+                    type: 'Category',
+                    finalEdits: data.photos,
+                    totalPhotos: data.raw_photos
+                }));
+                // Create color array - lighter for non-selected, normal for selected
+                const categoryColors = sortedCategoryHitRates.map(([cat, data]) => {
+                    const isSelected = activeFilters.category === cat;
+                    return isSelected ? 'rgba(34, 197, 94, 0.8)' : 'rgba(34, 197, 94, 0.3)';
+                });
+                createHistogramChart(
+                    'chart-category-hitrate',
+                    sortedCategoryHitRates.map(c => c[0]),
+                    sortedCategoryHitRates.map(c => c[1].hit_rate),
+                    'Hit Rate by Category',
+                    'Category',
+                    activeFilters.category ? categoryColors : 'rgba(34, 197, 94, 0.8)',
+                    'category',
+                    sortedCategoryHitRates.map(c => c[0]),
+                    true,  // isPercentage
+                    categoryHitRateMetadata
+                );
+            }
+        }
+        
+        // Group Hit Rate Chart - use currentAnalysisData for full metadata
+        if (currentAnalysisData && currentAnalysisData.metadata && currentAnalysisData.metadata.groups) {
+            let filteredGroups = Object.entries(currentAnalysisData.metadata.groups);
+            if (activeFilters.category) {
+                filteredGroups = filteredGroups.filter(([grp, data]) => data.category === activeFilters.category);
+            }
+            
+            const groupsWithHitRate = filteredGroups.filter(([grp, data]) => data.hit_rate !== null && data.hit_rate !== undefined);
+            
+            if (groupsWithHitRate.length > 0) {
+                const sortedGroupHitRates = groupsWithHitRate.sort((a, b) => b[1].hit_rate - a[1].hit_rate);
+                const groupHitRateMetadata = sortedGroupHitRates.map(([grp, data]) => ({
+                    name: grp,
+                    type: 'Group',
+                    finalEdits: data.photos,
+                    totalPhotos: data.raw_photos
+                }));
+                // Create color array - lighter for non-selected, normal for selected
+                const groupColors = sortedGroupHitRates.map(([grp, data]) => {
+                    const isSelected = activeFilters.group === grp;
+                    return isSelected ? 'rgba(34, 197, 94, 0.8)' : 'rgba(34, 197, 94, 0.3)';
+                });
+                createHistogramChart(
+                    'chart-group-hitrate',
+                    sortedGroupHitRates.map(g => g[0]),
+                    sortedGroupHitRates.map(g => g[1].hit_rate),
+                    'Hit Rate by Group',
+                    'Group',
+                    activeFilters.group ? groupColors : 'rgba(34, 197, 94, 0.8)',
+                    'group',
+                    sortedGroupHitRates.map(g => g[0]),
+                    true,  // isPercentage
+                    groupHitRateMetadata
+                );
+            }
+        }
+        
         if (analysis.camera_freq && Object.keys(analysis.camera_freq).length > 0) {
             const cameras = Object.entries(analysis.camera_freq).sort((a, b) => b[1] - a[1]);
             createHistogramChart('chart-cameras', cameras.map(c => c[0]), cameras.map(c => c[1]), 'Camera Bodies', 'Camera Model', 'rgba(59, 130, 246, 0.8)', 'camera', cameras.map(c => c[0]));
@@ -2342,6 +2431,71 @@ function displayAnalysisResults(analysis) {
         
         // Restore lens type button states after HTML re-render
         updateLensTypeButtons();
+        
+        // Add single-click handlers for categories and groups
+        document.querySelectorAll('.clickable-category').forEach(elem => {
+            const category = elem.getAttribute('data-category');
+            const isActive = activeFilters.category === category;
+            
+            elem.addEventListener('click', () => {
+                if (category) {
+                    // Toggle: if already selected, deselect it; otherwise select it
+                    if (activeFilters.category === category) {
+                        delete activeFilters.category;
+                        // Also clear any group filter when deselecting category
+                        delete activeFilters.group;
+                    } else {
+                        activeFilters.category = category;
+                        // Clear group filter when selecting a different category
+                        delete activeFilters.group;
+                    }
+                    applyFiltersAndRedraw();
+                }
+            });
+            
+            // Hover effect - only if not active
+            elem.addEventListener('mouseenter', () => {
+                if (!isActive) {
+                    elem.style.backgroundColor = 'rgba(59, 130, 246, 0.1)';
+                }
+            });
+            elem.addEventListener('mouseleave', () => {
+                if (!isActive) {
+                    elem.style.backgroundColor = 'transparent';
+                }
+            });
+        });
+        
+        document.querySelectorAll('.clickable-group').forEach(elem => {
+            const group = elem.getAttribute('data-group');
+            const isActive = activeFilters.group === group;
+            
+            elem.addEventListener('click', () => {
+                if (group) {
+                    // Toggle: if already selected, deselect it; otherwise select it
+                    if (activeFilters.group === group) {
+                        delete activeFilters.group;
+                    } else {
+                        activeFilters.group = group;
+                        // Don't clear category filter - groups will filter by category
+                        // Category will auto-highlight based on group's parent category
+                    }
+                    applyFiltersAndRedraw();
+                }
+            });
+            
+            // Hover effect - only if not active
+            elem.addEventListener('mouseenter', () => {
+                if (!isActive) {
+                    elem.style.backgroundColor = 'rgba(147, 51, 234, 0.1)';
+                }
+            });
+            elem.addEventListener('mouseleave', () => {
+                if (!isActive) {
+                    elem.style.backgroundColor = 'transparent';
+                }
+            });
+        });
     }, 100);
 }
 

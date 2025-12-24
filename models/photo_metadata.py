@@ -69,6 +69,9 @@ class PhotoMetadata:
     exposure_bias: Optional[float] = None
     flash_mode: Optional[str] = None
     date_taken: Optional[datetime] = None
+    date_only: Optional[str] = None
+    time_only: Optional[str] = None
+    day_of_week: Optional[str] = None
     file_size: Optional[int] = None
     width: Optional[int] = None
     height: Optional[int] = None
@@ -80,11 +83,18 @@ class PhotoMetadata:
         Post-initialization processing.
         
         Converts shutter speed string to decimal if not already set.
+        Populates date_only, time_only, and day_of_week from date_taken.
         """
         if self.shutter_speed and not self.shutter_speed_decimal:
             self.shutter_speed_decimal = self._convert_shutter_speed_to_decimal(
                 self.shutter_speed
             )
+        
+        # Populate date/time fields from date_taken
+        if self.date_taken and not self.date_only:
+            self.date_only = self.date_taken.strftime('%Y-%m-%d')
+            self.time_only = self.date_taken.strftime('%H:%M:%S')
+            self.day_of_week = self.date_taken.strftime('%A')
     
     @staticmethod
     def _convert_shutter_speed_to_decimal(shutter_speed: str) -> Optional[float]:

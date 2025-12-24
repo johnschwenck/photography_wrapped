@@ -101,6 +101,21 @@ class StatisticsAnalyzer:
         """
         analysis = Analysis(name=name)
         total_raw = 0
+        all_photos = []
+        
+        # Get session info map (name, category, group)
+        session_map = {}
+        for session_id in session_ids:
+            session_row = self.db.conn.execute(
+                "SELECT name, category, group_name FROM sessions WHERE id = ?",
+                (session_id,)
+            ).fetchone()
+            if session_row:
+                session_map[session_id] = {
+                    'name': session_row['name'],
+                    'category': session_row['category'],
+                    'group': session_row['group_name']
+                }
         
         for session_id in session_ids:
             session = self.db.get_session(session_id)
@@ -110,6 +125,7 @@ class StatisticsAnalyzer:
             
             photos = self.db.get_photos_by_session(session_id)
             session.photos = photos
+            all_photos.extend(photos)
             
             stats = session.calculate_statistics()
             analysis.add_session_stats(stats)
@@ -123,6 +139,30 @@ class StatisticsAnalyzer:
         analysis.total_raw_photos = total_raw
         if total_raw > 0:
             analysis.calculate_aggregated_hit_rate(total_raw)
+        
+        # Build photo details array
+        photo_details = []
+        for photo in all_photos:
+            session_info = session_map.get(photo.session_id, {'name': 'Unknown', 'category': None, 'group': None})
+            photo_details.append({
+                'date_taken': photo.date_taken.strftime('%Y-%m-%d') if photo.date_taken else None,
+                'date_only': photo.date_only,
+                'time_only': photo.time_only,
+                'day_of_week': photo.day_of_week,
+                'category': session_info['category'] or 'Uncategorized',
+                'group': session_info['group'] or 'Ungrouped',
+                'session_name': session_info['name'],
+                'camera': photo.camera or 'Unknown',
+                'lens': photo.lens or 'Unknown',
+                'aperture': str(photo.aperture) if photo.aperture else None,
+                'shutter_speed': photo.shutter_speed,
+                'iso': str(photo.iso) if photo.iso else None,
+                'focal_length': str(photo.focal_length) if photo.focal_length else None,
+                'filename': photo.file_name,
+                'file_path': photo.file_path
+            })
+        
+        analysis.photos = photo_details
         
         return analysis
     
@@ -309,6 +349,20 @@ class StatisticsAnalyzer:
         if not session_ids:
             raise ValueError("No session IDs provided")
         
+        # Get session info for session names, category, and group
+        session_map = {}
+        for session_id in session_ids:
+            session_row = self.db.conn.execute(
+                "SELECT name, category, group_name FROM sessions WHERE id = ?",
+                (session_id,)
+            ).fetchone()
+            if session_row:
+                session_map[session_id] = {
+                    'name': session_row['name'],
+                    'category': session_row['category'],
+                    'group': session_row['group_name']
+                }
+        
         # Get all photos from specified sessions
         all_photos = []
         for session_id in session_ids:
@@ -370,5 +424,29 @@ class StatisticsAnalyzer:
         # Create Analysis object
         analysis = Analysis(name=name)
         analysis.add_session_stats(stats)
+        
+        # Build photo details array
+        photo_details = []
+        for photo in filtered_photos:
+            session_info = session_map.get(photo.session_id, {'name': 'Unknown', 'category': None, 'group': None})
+            photo_details.append({
+                'date_taken': photo.date_taken.strftime('%Y-%m-%d') if photo.date_taken else None,
+                'date_only': photo.date_only,
+                'time_only': photo.time_only,
+                'day_of_week': photo.day_of_week,
+                'category': session_info['category'] or 'Uncategorized',
+                'group': session_info['group'] or 'Ungrouped',
+                'session_name': session_info['name'],
+                'camera': photo.camera or 'Unknown',
+                'lens': photo.lens or 'Unknown',
+                'aperture': str(photo.aperture) if photo.aperture else None,
+                'shutter_speed': photo.shutter_speed,
+                'iso': str(photo.iso) if photo.iso else None,
+                'focal_length': str(photo.focal_length) if photo.focal_length else None,
+                'filename': photo.file_name,
+                'file_path': photo.file_path
+            })
+        
+        analysis.photos = photo_details
         
         return analysis

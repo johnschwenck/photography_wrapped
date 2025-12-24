@@ -191,6 +191,9 @@ class Analysis:
     # Additional metadata
     metadata: Dict[str, Any] = field(default_factory=dict)
     
+    # Photo details (for filtered analyses)
+    photos: List[Dict[str, Any]] = field(default_factory=list)
+    
     def add_session_stats(self, session_stats: Dict[str, Any]):
         """
         Add statistics from a session to this analysis.
@@ -268,6 +271,7 @@ class Analysis:
             'prime_count': self.prime_count,
             'zoom_count': self.zoom_count,
             'metadata': self.metadata,
+            'photos': self.photos,
         }
     
     def __repr__(self) -> str:
