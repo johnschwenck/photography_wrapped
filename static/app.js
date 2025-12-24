@@ -1928,7 +1928,7 @@ function displayAnalysisResults(analysis) {
     // Show categories breakdown (always show if metadata exists)
     if (analysis.metadata && analysis.metadata.categories) {
         html += '<div class="result-card"><h3>Categories</h3>';
-        html += '<div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 10px;">';
+        html += '<div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 10px; max-height: 225px; overflow-y: auto;">';
         const sortedCats = Object.entries(analysis.metadata.categories)
             .sort((a, b) => b[1].photos - a[1].photos);
         
@@ -1978,7 +1978,7 @@ function displayAnalysisResults(analysis) {
     // Show groups breakdown - filter by category if one is selected
     if (analysis.metadata && analysis.metadata.groups) {
         html += '<div class="result-card"><h3>Groups</h3>';
-        html += '<div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 10px;">';
+        html += '<div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 10px; max-height: 225px; overflow-y: auto;">';
         
         // Filter groups by selected category
         let filteredGroups = Object.entries(analysis.metadata.groups);
@@ -2113,22 +2113,27 @@ function displayAnalysisResults(analysis) {
         </div>`;
     }
 
-    // Camera Bodies
-    if (analysis.camera_freq && Object.keys(analysis.camera_freq).length > 0) {
+    // Camera Bodies - show all from currentAnalysisData, dim unavailable from analysis
+    if (currentAnalysisData && currentAnalysisData.camera_freq && Object.keys(currentAnalysisData.camera_freq).length > 0) {
         const chartId = 'chart-cameras';
         html += `<div class="result-card"><h3>Camera Bodies</h3><div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; align-items: start;"><div style="max-height: 400px; overflow-y: auto;">`;
-        const cameras = Object.entries(analysis.camera_freq)
+        const cameras = Object.entries(currentAnalysisData.camera_freq)
             .sort((a, b) => b[1] - a[1]);
         
         cameras.forEach(([camera, count]) => {
-            const percentage = ((count / analysis.total_photos) * 100).toFixed(1);
-            html += `<p><strong>${camera}:</strong> ${count} photos (${percentage}%)</p>`;
+            const isActive = activeFilters.camera === camera;
+            const isAvailable = analysis.camera_freq && analysis.camera_freq[camera];
+            const displayCount = isAvailable ? analysis.camera_freq[camera] : 0;
+            const percentage = isAvailable ? ((analysis.camera_freq[camera] / analysis.total_photos) * 100).toFixed(1) : '0.0';
+            const activeStyle = isActive ? 'border: 2px solid rgba(59, 130, 246, 0.9); background-color: rgba(59, 130, 246, 0.15);' : 'border: 2px solid transparent;';
+            const dimStyle = !isAvailable ? 'opacity: 0.3; cursor: not-allowed;' : '';
+            html += `<p class="clickable-camera" data-camera="${escapeHtml(camera)}" style="margin: 0; cursor: pointer; padding: 5px; border-radius: 8px; transition: all 0.2s; ${activeStyle} ${dimStyle}"><strong>${camera}:</strong> ${displayCount} photos (${percentage}%)</p>`;
         });
         html += `</div><div><canvas id="${chartId}" style="height: 350px;"></canvas></div></div></div>`;
     }
 
-    // All lenses
-    if (analysis.lens_freq && Object.keys(analysis.lens_freq).length > 0) {
+    // All lenses - show all from currentAnalysisData, dim unavailable from analysis
+    if (currentAnalysisData && currentAnalysisData.lens_freq && Object.keys(currentAnalysisData.lens_freq).length > 0) {
         const chartId = 'chart-lenses';
         html += `<div class="result-card">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
@@ -2140,21 +2145,26 @@ function displayAnalysisResults(analysis) {
                 </div>
             </div>
             <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; align-items: start;"><div style="max-height: 400px; overflow-y: auto;">`;
-        const lenses = Object.entries(analysis.lens_freq)
+        const lenses = Object.entries(currentAnalysisData.lens_freq)
             .sort((a, b) => a[0].localeCompare(b[0])); // Alphabetical order
         
         lenses.forEach(([lens, count]) => {
-            const percentage = ((count / analysis.total_photos) * 100).toFixed(1);
-            html += `<p><strong>${lens}:</strong> ${count} photos (${percentage}%)</p>`;
+            const isActive = activeFilters.lens === lens;
+            const isAvailable = analysis.lens_freq && analysis.lens_freq[lens];
+            const displayCount = isAvailable ? analysis.lens_freq[lens] : 0;
+            const percentage = isAvailable ? ((analysis.lens_freq[lens] / analysis.total_photos) * 100).toFixed(1) : '0.0';
+            const activeStyle = isActive ? 'border: 2px solid rgba(59, 130, 246, 0.9); background-color: rgba(59, 130, 246, 0.15);' : 'border: 2px solid transparent;';
+            const dimStyle = !isAvailable ? 'opacity: 0.3; cursor: not-allowed;' : '';
+            html += `<p class="clickable-lens" data-lens="${escapeHtml(lens)}" style="margin: 0; cursor: pointer; padding: 5px; border-radius: 8px; transition: all 0.2s; ${activeStyle} ${dimStyle}"><strong>${lens}:</strong> ${displayCount} photos (${percentage}%)</p>`;
         });
         html += `</div><div><canvas id="${chartId}" style="height: 350px;"></canvas></div></div></div>`;
     }
 
-    // Aperture Stats
-    if (analysis.aperture_freq && Object.keys(analysis.aperture_freq).length > 0) {
+    // Aperture Stats - show all from currentAnalysisData, dim unavailable from analysis
+    if (currentAnalysisData && currentAnalysisData.aperture_freq && Object.keys(currentAnalysisData.aperture_freq).length > 0) {
         const chartId = 'chart-apertures';
         html += `<div class="result-card"><h3>Aperture Settings</h3><div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; align-items: start;"><div style="max-height: 400px; overflow-y: auto;">`;
-        const apertures = Object.entries(analysis.aperture_freq)
+        const apertures = Object.entries(currentAnalysisData.aperture_freq)
             .sort((a, b) => {
                 const aNum = parseFloat(a[0]);
                 const bNum = parseFloat(b[0]);
@@ -2162,14 +2172,19 @@ function displayAnalysisResults(analysis) {
             });
         
         apertures.forEach(([aperture, count]) => {
-            const percentage = ((count / analysis.total_photos) * 100).toFixed(1);
-            html += `<p><strong>f/${aperture}:</strong> ${count} photos (${percentage}%)</p>`;
+            const isActive = activeFilters.aperture === aperture;
+            const isAvailable = analysis.aperture_freq && analysis.aperture_freq[aperture];
+            const displayCount = isAvailable ? analysis.aperture_freq[aperture] : 0;
+            const percentage = isAvailable ? ((analysis.aperture_freq[aperture] / analysis.total_photos) * 100).toFixed(1) : '0.0';
+            const activeStyle = isActive ? 'border: 2px solid rgba(59, 130, 246, 0.9); background-color: rgba(59, 130, 246, 0.15);' : 'border: 2px solid transparent;';
+            const dimStyle = !isAvailable ? 'opacity: 0.3; cursor: not-allowed;' : '';
+            html += `<p class="clickable-aperture" data-aperture="${escapeHtml(aperture)}" style="margin: 0; cursor: pointer; padding: 5px; border-radius: 8px; transition: all 0.2s; ${activeStyle} ${dimStyle}"><strong>f/${aperture}:</strong> ${displayCount} photos (${percentage}%)</p>`;
         });
         html += `</div><div><canvas id="${chartId}" style="height: 350px;"></canvas></div></div></div>`;
     }
 
-    // Shutter Speed Stats
-    if (analysis.shutter_speed_freq && Object.keys(analysis.shutter_speed_freq).length > 0) {
+    // Shutter Speed Stats - show all from currentAnalysisData, dim unavailable from analysis
+    if (currentAnalysisData && currentAnalysisData.shutter_speed_freq && Object.keys(currentAnalysisData.shutter_speed_freq).length > 0) {
         const chartId = 'chart-shutters';
         html += `<div class="result-card"><h3>Shutter Speeds</h3><div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; align-items: start;"><div style="max-height: 400px; overflow-y: auto;">`;
         const parseShutterSpeed = (speed) => {
@@ -2179,37 +2194,47 @@ function displayAnalysisResults(analysis) {
             }
             return parseFloat(speed);
         };
-        const shutters = Object.entries(analysis.shutter_speed_freq)
+        const shutters = Object.entries(currentAnalysisData.shutter_speed_freq)
             .sort((a, b) => parseShutterSpeed(a[0]) - parseShutterSpeed(b[0])); // Ascending order
         
         shutters.forEach(([shutter, count]) => {
-            const percentage = ((count / analysis.total_photos) * 100).toFixed(1);
-            html += `<p><strong>${shutter}s:</strong> ${count} photos (${percentage}%)</p>`;
+            const isActive = activeFilters.shutter_speed === shutter;
+            const isAvailable = analysis.shutter_speed_freq && analysis.shutter_speed_freq[shutter];
+            const displayCount = isAvailable ? analysis.shutter_speed_freq[shutter] : 0;
+            const percentage = isAvailable ? ((analysis.shutter_speed_freq[shutter] / analysis.total_photos) * 100).toFixed(1) : '0.0';
+            const activeStyle = isActive ? 'border: 2px solid rgba(59, 130, 246, 0.9); background-color: rgba(59, 130, 246, 0.15);' : 'border: 2px solid transparent;';
+            const dimStyle = !isAvailable ? 'opacity: 0.3; cursor: not-allowed;' : '';
+            html += `<p class="clickable-shutter" data-shutter="${escapeHtml(shutter)}" style="margin: 0; cursor: pointer; padding: 5px; border-radius: 8px; transition: all 0.2s; ${activeStyle} ${dimStyle}"><strong>${shutter}s:</strong> ${displayCount} photos (${percentage}%)</p>`;
         });
         html += `</div><div><canvas id="${chartId}" style="height: 350px;"></canvas></div></div></div>`;
     }
 
-    // ISO Stats
-    if (analysis.iso_freq && Object.keys(analysis.iso_freq).length > 0) {
+    // ISO Stats - show all from currentAnalysisData, dim unavailable from analysis
+    if (currentAnalysisData && currentAnalysisData.iso_freq && Object.keys(currentAnalysisData.iso_freq).length > 0) {
         const chartId = 'chart-isos';
         html += `<div class="result-card"><h3>ISO Settings</h3><div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; align-items: start;"><div style="max-height: 400px; overflow-y: auto;">`;
-        const isos = Object.entries(analysis.iso_freq)
+        const isos = Object.entries(currentAnalysisData.iso_freq)
             .sort((a, b) => parseInt(a[0]) - parseInt(b[0])); // Ascending order (smallest to largest)
         
         isos.forEach(([iso, count]) => {
-            const percentage = ((count / analysis.total_photos) * 100).toFixed(1);
-            html += `<p><strong>ISO ${iso}:</strong> ${count} photos (${percentage}%)</p>`;
+            const isActive = activeFilters.iso === iso;
+            const isAvailable = analysis.iso_freq && analysis.iso_freq[iso];
+            const displayCount = isAvailable ? analysis.iso_freq[iso] : 0;
+            const percentage = isAvailable ? ((analysis.iso_freq[iso] / analysis.total_photos) * 100).toFixed(1) : '0.0';
+            const activeStyle = isActive ? 'border: 2px solid rgba(59, 130, 246, 0.9); background-color: rgba(59, 130, 246, 0.15);' : 'border: 2px solid transparent;';
+            const dimStyle = !isAvailable ? 'opacity: 0.3; cursor: not-allowed;' : '';
+            html += `<p class="clickable-iso" data-iso="${escapeHtml(iso)}" style="margin: 0; cursor: pointer; padding: 5px; border-radius: 8px; transition: all 0.2s; ${activeStyle} ${dimStyle}"><strong>ISO ${iso}:</strong> ${displayCount} photos (${percentage}%)</p>`;
         });
         html += `</div><div><canvas id="${chartId}" style="height: 350px;"></canvas></div></div></div>`;
     }
 
-    // Focal Length Stats
-    if (analysis.focal_length_freq && Object.keys(analysis.focal_length_freq).length > 0) {
+    // Focal Length Stats - show all from currentAnalysisData, dim unavailable from analysis
+    if (currentAnalysisData && currentAnalysisData.focal_length_freq && Object.keys(currentAnalysisData.focal_length_freq).length > 0) {
         // Separate primes and zooms, bucket zooms by 10mm
         const primes = {};
         const zoomBuckets = {};
         
-        Object.entries(analysis.focal_length_freq).forEach(([focal, count]) => {
+        Object.entries(currentAnalysisData.focal_length_freq).forEach(([focal, count]) => {
             const focalNum = parseFloat(focal);
             
             // Check if it's a "prime" focal length (common primes: 14, 16, 20, 24, 28, 35, 40, 50, 85, 100, 105, 135, 200, 300, 400, 500, 600)
@@ -2238,9 +2263,14 @@ function displayAnalysisResults(analysis) {
                 .sort((a, b) => parseFloat(a[0]) - parseFloat(b[0]));
             
             sortedPrimes.forEach(([focal, count]) => {
-                const percentage = ((count / analysis.total_photos) * 100).toFixed(1);
                 const focalDisplay = parseInt(focal); // Remove decimals for primes
-                html += `<p><strong>${focalDisplay}mm:</strong> ${count} photos (${percentage}%)</p>`;
+                const isActive = activeFilters.focal_length === focal;
+                const isAvailable = analysis.focal_length_freq && analysis.focal_length_freq[focal];
+                const displayCount = isAvailable ? analysis.focal_length_freq[focal] : 0;
+                const percentage = isAvailable ? ((analysis.focal_length_freq[focal] / analysis.total_photos) * 100).toFixed(1) : '0.0';
+                const activeStyle = isActive ? 'border: 2px solid rgba(59, 130, 246, 0.9); background-color: rgba(59, 130, 246, 0.15);' : 'border: 2px solid transparent;';
+                const dimStyle = !isAvailable ? 'opacity: 0.3; cursor: not-allowed;' : '';
+                html += `<p class="clickable-focal" data-focal="${escapeHtml(focal)}" style="margin: 0; cursor: pointer; padding: 5px; border-radius: 8px; transition: all 0.2s; ${activeStyle} ${dimStyle}"><strong>${focalDisplay}mm:</strong> ${displayCount} photos (${percentage}%)</p>`;
             });
             html += `</div><div><canvas id="${chartId}" style="height: 350px;"></canvas></div></div></div>`;
         }
@@ -2249,6 +2279,22 @@ function displayAnalysisResults(analysis) {
         if (Object.keys(zoomBuckets).length > 0 && showZooms) {
             const chartId = 'chart-zooms';
             html += `<div class="result-card"><h3>Zoom Focal Lengths (10mm buckets)</h3><div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; align-items: start;"><div style="max-height: 400px; overflow-y: auto;">`;
+            
+            // Also calculate zoom buckets from filtered analysis data
+            const filteredZoomBuckets = {};
+            if (analysis.focal_length_freq) {
+                Object.entries(analysis.focal_length_freq).forEach(([focal, count]) => {
+                    const focalNum = parseFloat(focal);
+                    const commonPrimes = [14, 16, 20, 24, 28, 35, 40, 50, 85, 100, 105, 135, 200, 300, 400, 500, 600];
+                    if (!commonPrimes.includes(focalNum)) {
+                        const bucketStart = Math.floor(focalNum / 10) * 10;
+                        const bucketEnd = bucketStart + 9;
+                        const bucketKey = `${bucketStart}-${bucketEnd}mm`;
+                        filteredZoomBuckets[bucketKey] = (filteredZoomBuckets[bucketKey] || 0) + count;
+                    }
+                });
+            }
+            
             const sortedZooms = Object.entries(zoomBuckets)
                 .sort((a, b) => {
                     const aStart = parseInt(a[0].split('-')[0]);
@@ -2257,8 +2303,11 @@ function displayAnalysisResults(analysis) {
                 });
             
             sortedZooms.forEach(([range, count]) => {
-                const percentage = ((count / analysis.total_photos) * 100).toFixed(1);
-                html += `<p><strong>${range}:</strong> ${count} photos (${percentage}%)</p>`;
+                const isAvailable = filteredZoomBuckets[range];
+                const displayCount = isAvailable ? filteredZoomBuckets[range] : 0;
+                const percentage = isAvailable ? ((filteredZoomBuckets[range] / analysis.total_photos) * 100).toFixed(1) : '0.0';
+                const dimStyle = !isAvailable ? 'opacity: 0.3; cursor: not-allowed;' : '';
+                html += `<p style="margin: 0; padding: 5px; ${dimStyle}"><strong>${range}:</strong> ${displayCount} photos (${percentage}%)</p>`;
             });
             html += `</div><div><canvas id="${chartId}" style="height: 350px;"></canvas></div></div></div>`;
         }
@@ -2492,6 +2541,180 @@ function displayAnalysisResults(analysis) {
             });
             elem.addEventListener('mouseleave', () => {
                 if (!isActive) {
+                    elem.style.backgroundColor = 'transparent';
+                }
+            });
+        });
+        
+        // Add click handlers for camera bodies
+        document.querySelectorAll('.clickable-camera').forEach(elem => {
+            const camera = elem.getAttribute('data-camera');
+            const isActive = activeFilters.camera === camera;
+            const isDisabled = elem.style.opacity === '0.3';
+            
+            elem.addEventListener('click', () => {
+                if (camera && !isDisabled) {
+                    if (activeFilters.camera === camera) {
+                        delete activeFilters.camera;
+                    } else {
+                        activeFilters.camera = camera;
+                    }
+                    applyFiltersAndRedraw();
+                }
+            });
+            
+            elem.addEventListener('mouseenter', () => {
+                if (!isActive && !isDisabled) {
+                    elem.style.backgroundColor = 'rgba(59, 130, 246, 0.1)';
+                }
+            });
+            elem.addEventListener('mouseleave', () => {
+                if (!isActive && !isDisabled) {
+                    elem.style.backgroundColor = 'transparent';
+                }
+            });
+        });
+        
+        // Add click handlers for lenses
+        document.querySelectorAll('.clickable-lens').forEach(elem => {
+            const lens = elem.getAttribute('data-lens');
+            const isActive = activeFilters.lens === lens;
+            const isDisabled = elem.style.opacity === '0.3';
+            
+            elem.addEventListener('click', () => {
+                if (lens && !isDisabled) {
+                    if (activeFilters.lens === lens) {
+                        delete activeFilters.lens;
+                    } else {
+                        activeFilters.lens = lens;
+                    }
+                    applyFiltersAndRedraw();
+                }
+            });
+            
+            elem.addEventListener('mouseenter', () => {
+                if (!isActive && !isDisabled) {
+                    elem.style.backgroundColor = 'rgba(59, 130, 246, 0.1)';
+                }
+            });
+            elem.addEventListener('mouseleave', () => {
+                if (!isActive && !isDisabled) {
+                    elem.style.backgroundColor = 'transparent';
+                }
+            });
+        });
+        
+        // Add click handlers for apertures
+        document.querySelectorAll('.clickable-aperture').forEach(elem => {
+            const aperture = elem.getAttribute('data-aperture');
+            const isActive = activeFilters.aperture === aperture;
+            const isDisabled = elem.style.opacity === '0.3';
+            
+            elem.addEventListener('click', () => {
+                if (aperture && !isDisabled) {
+                    if (activeFilters.aperture === aperture) {
+                        delete activeFilters.aperture;
+                    } else {
+                        activeFilters.aperture = aperture;
+                    }
+                    applyFiltersAndRedraw();
+                }
+            });
+            
+            elem.addEventListener('mouseenter', () => {
+                if (!isActive && !isDisabled) {
+                    elem.style.backgroundColor = 'rgba(59, 130, 246, 0.1)';
+                }
+            });
+            elem.addEventListener('mouseleave', () => {
+                if (!isActive && !isDisabled) {
+                    elem.style.backgroundColor = 'transparent';
+                }
+            });
+        });
+        
+        // Add click handlers for shutter speeds
+        document.querySelectorAll('.clickable-shutter').forEach(elem => {
+            const shutter = elem.getAttribute('data-shutter');
+            const isActive = activeFilters.shutter_speed === shutter;
+            const isDisabled = elem.style.opacity === '0.3';
+            
+            elem.addEventListener('click', () => {
+                if (shutter && !isDisabled) {
+                    if (activeFilters.shutter_speed === shutter) {
+                        delete activeFilters.shutter_speed;
+                    } else {
+                        activeFilters.shutter_speed = shutter;
+                    }
+                    applyFiltersAndRedraw();
+                }
+            });
+            
+            elem.addEventListener('mouseenter', () => {
+                if (!isActive && !isDisabled) {
+                    elem.style.backgroundColor = 'rgba(59, 130, 246, 0.1)';
+                }
+            });
+            elem.addEventListener('mouseleave', () => {
+                if (!isActive && !isDisabled) {
+                    elem.style.backgroundColor = 'transparent';
+                }
+            });
+        });
+        
+        // Add click handlers for ISO settings
+        document.querySelectorAll('.clickable-iso').forEach(elem => {
+            const iso = elem.getAttribute('data-iso');
+            const isActive = activeFilters.iso === iso;
+            const isDisabled = elem.style.opacity === '0.3';
+            
+            elem.addEventListener('click', () => {
+                if (iso && !isDisabled) {
+                    if (activeFilters.iso === iso) {
+                        delete activeFilters.iso;
+                    } else {
+                        activeFilters.iso = iso;
+                    }
+                    applyFiltersAndRedraw();
+                }
+            });
+            
+            elem.addEventListener('mouseenter', () => {
+                if (!isActive && !isDisabled) {
+                    elem.style.backgroundColor = 'rgba(59, 130, 246, 0.1)';
+                }
+            });
+            elem.addEventListener('mouseleave', () => {
+                if (!isActive && !isDisabled) {
+                    elem.style.backgroundColor = 'transparent';
+                }
+            });
+        });
+        
+        // Add click handlers for focal lengths
+        document.querySelectorAll('.clickable-focal').forEach(elem => {
+            const focal = elem.getAttribute('data-focal');
+            const isActive = activeFilters.focal_length === focal;
+            const isDisabled = elem.style.opacity === '0.3';
+            
+            elem.addEventListener('click', () => {
+                if (focal && !isDisabled) {
+                    if (activeFilters.focal_length === focal) {
+                        delete activeFilters.focal_length;
+                    } else {
+                        activeFilters.focal_length = focal;
+                    }
+                    applyFiltersAndRedraw();
+                }
+            });
+            
+            elem.addEventListener('mouseenter', () => {
+                if (!isActive && !isDisabled) {
+                    elem.style.backgroundColor = 'rgba(59, 130, 246, 0.1)';
+                }
+            });
+            elem.addEventListener('mouseleave', () => {
+                if (!isActive && !isDisabled) {
                     elem.style.backgroundColor = 'transparent';
                 }
             });
