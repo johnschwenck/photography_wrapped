@@ -665,29 +665,29 @@ function renderQueue() {
 
     let html = '';
     extractionQueue.forEach((item, index) => {
-        html += `
-            <div class="queue-item" data-id="${item.id}">
-                <div class="queue-item-header">
-                    <span class="queue-item-mode">${item.mode}</span>
-                    <div class="queue-item-actions">
-                        <button onclick="editQueueItem(${item.id})">Edit</button>
-                        <button class="delete-btn" onclick="removeFromQueue(${item.id})">Remove</button>
+            html += `
+                <div class="queue-item" data-id="${item.id}">
+                    <div class="queue-item-header">
+                        <span class="queue-item-mode">${item.mode}</span>
+                        <div class="queue-item-actions">
+                            <button onclick="editQueueItem(${item.id})">Edit</button>
+                            <button class="delete-btn" onclick="removeFromQueue(${item.id})">Remove</button>
+                        </div>
+                    </div>
+                    <div class="queue-item-path" id="path-${item.id}">
+                        ${item.folderPath}
+                    </div>
+                    <div class="queue-item-details">
+                        <div class="queue-item-detail"><strong>Category:</strong> ${item.category}</div>
+                        <div class="queue-item-detail"><strong>Group:</strong> ${item.group}</div>
+                        ${item.sessionName ? `<div class="queue-item-detail"><strong>Session:</strong> ${item.sessionName}</div>` : ''}
+                        ${item.sessionDate ? `<div class="queue-item-detail"><strong>Date:</strong> ${item.sessionDate}</div>` : ''}
+                        ${!item.sessionDate && item.useDateHeuristics ? `<div class="queue-item-detail"><strong>Date:</strong> Auto-detect</div>` : ''}
+                        ${item.targetFolder ? `<div class="queue-item-detail"><strong>Target Folder:</strong> ${item.targetFolder}</div>` : ''}
+                        <div class="queue-item-detail"><strong>Hit Rate:</strong> ${item.calculateHitRate ? 'Yes' : 'No'}</div>
                     </div>
                 </div>
-                <div class="queue-item-path" id="path-${item.id}">
-                    ${item.folderPath}
-                </div>
-                <div class="queue-item-details">
-                    <div class="queue-item-detail"><strong>Category:</strong> ${item.category}</div>
-                    <div class="queue-item-detail"><strong>Group:</strong> ${item.group}</div>
-                    ${item.sessionName ? `<div class="queue-item-detail"><strong>Session:</strong> ${item.sessionName}</div>` : ''}
-                    ${item.sessionDate ? `<div class="queue-item-detail"><strong>Date:</strong> ${item.sessionDate}</div>` : ''}
-                    ${!item.sessionDate && item.useDateHeuristics ? `<div class="queue-item-detail"><strong>Date:</strong> Auto-detect</div>` : ''}
-                    ${item.targetFolder ? `<div class="queue-item-detail"><strong>Target Folder:</strong> ${item.targetFolder}</div>` : ''}
-                    <div class="queue-item-detail"><strong>Hit Rate:</strong> ${item.calculateHitRate ? 'Yes' : 'No'}</div>
-                </div>
-            </div>
-        `;
+            `;
     });
 
     queueContainer.innerHTML = html;
@@ -1403,11 +1403,230 @@ let chartInstances = [];
 let currentAnalysisData = null; // Store the full analysis data
 let currentFilteredAnalysisData = null; // Store the analysis matching ALL active filters
 let currentFacetAnalyses = null; // Store per-pane facet analyses (all filters except that pane)
+let currentPhotoDetailsPhotos = null; // Store the current Photo Details rows for local-only charts
+let currentPhotoDetailsVisiblePhotos = null; // Store the Photo Details rows currently shown (after local chart filtering)
+let photoDetailsLocalFilters = { day_of_week: [], time_of_day: [] }; // Local-only filters for Photo Details chart/table
 let analysisRequestSeq = 0; // Prevent out-of-order async responses from overwriting UI
 let analysisAbortController = null; // Abort in-flight analysis requests when filters change quickly
 let activeFilters = {}; // Store active filters { filterType: value }
 let activeLensType = 'all'; // Track lens type filter: 'all', 'prime', or 'zoom'
+let photoDetailsTemporalMode = 'day_of_week'; // 'day_of_week' | 'time_of_day'
 let expandedSections = {}; // Track which sections are expanded
+
+function requestChartResize() {
+    // Chart.js can compute a tiny/default width if a canvas is created while hidden
+    // (e.g., in a collapsed section). Force a reflow after layout/visibility changes.
+    const resizeAll = () => {
+        chartInstances.forEach(chart => {
+            try {
+                if (chart && typeof chart.resize === 'function') {
+                    chart.resize();
+                }
+            } catch (e) {
+                // ignore
+            }
+        });
+    };
+
+    // Multi-pass: immediate next frame, then again after one more frame, and once after a short delay.
+    try {
+        if (typeof window.requestAnimationFrame === 'function') {
+            window.requestAnimationFrame(() => {
+                resizeAll();
+                window.requestAnimationFrame(() => {
+                    resizeAll();
+                });
+            });
+        } else {
+            resizeAll();
+        }
+        setTimeout(resizeAll, 200);
+    } catch (e) {
+        // ignore
+    }
+}
+
+function normalizeToArray(value) {
+    if (value === undefined || value === null) return [];
+    return Array.isArray(value) ? value : [value];
+}
+
+function getPhotoDetailsTimeOfDayBucket(timeOnly) {
+    // timeOnly expected like "HH:MM:SS".
+    if (!timeOnly || typeof timeOnly !== 'string') return 'Unknown';
+    const parts = timeOnly.split(':');
+    if (parts.length < 1) return 'Unknown';
+    const hour = parseInt(parts[0], 10);
+    if (Number.isNaN(hour) || hour < 0 || hour > 23) return 'Unknown';
+
+    if (hour <= 3) return 'Night';
+    if (hour <= 11) return 'Morning';
+    if (hour <= 18) return 'Afternoon';
+    return 'Night';
+}
+
+function buildPhotoDetailsTemporalHistogram(photos, mode) {
+    const safePhotos = Array.isArray(photos) ? photos : [];
+
+    if (mode === 'time_of_day') {
+        const ordered = ['Morning', 'Afternoon', 'Night', 'Unknown'];
+        const counts = Object.fromEntries(ordered.map(k => [k, 0]));
+
+        safePhotos.forEach(p => {
+            const bucket = getPhotoDetailsTimeOfDayBucket(p && p.time_only);
+            counts[bucket] = (counts[bucket] || 0) + 1;
+        });
+
+        const labels = ordered;
+        return {
+            title: 'Photo Details - Time of Day',
+            xAxisLabel: 'Time Period',
+            labels,
+            data: labels.map(l => counts[l]),
+            color: 'rgba(251, 146, 60, 0.8)'
+        };
+    }
+
+    const orderedDays = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday', 'Unknown'];
+    const counts = Object.fromEntries(orderedDays.map(k => [k, 0]));
+
+    safePhotos.forEach(p => {
+        const raw = p && p.day_of_week;
+        const day = (raw && typeof raw === 'string' && raw.trim().length > 0) ? raw.trim() : 'Unknown';
+        if (counts[day] === undefined) {
+            counts.Unknown += 1;
+        } else {
+            counts[day] += 1;
+        }
+    });
+
+    const labels = orderedDays;
+    return {
+        title: 'Photo Details - Day of Week',
+        xAxisLabel: 'Day',
+        labels,
+        data: labels.map(l => counts[l]),
+        color: 'rgba(59, 130, 246, 0.8)'
+    };
+}
+
+function isFilterValueSelected(filterType, value) {
+    const values = normalizeToArray(activeFilters[filterType]);
+    return values.some(v => v === value);
+}
+
+function setMultiFilterValue(filterType, value) {
+    // Toggle value in list; delete key if empty
+    const values = normalizeToArray(activeFilters[filterType]);
+    const exists = values.some(v => v === value);
+    const next = exists ? values.filter(v => v !== value) : [...values, value];
+    if (next.length === 0) {
+        delete activeFilters[filterType];
+    } else {
+        activeFilters[filterType] = next;
+    }
+}
+
+function isMultiSelectGesture(event) {
+    // Windows/Linux: Ctrl+Click; macOS: Cmd+Click
+    return !!(event && (event.ctrlKey || event.metaKey));
+}
+
+function normalizeToUniqueStringArray(values) {
+    const arr = normalizeToArray(values).map(v => String(v));
+    return Array.from(new Set(arr));
+}
+
+function applyLocalSelection(localKey, value, event) {
+    // Plain click: select single value, or deselect if already selected.
+    // Ctrl/Cmd+click: toggle in multi-selection.
+    const cur = normalizeToUniqueStringArray(photoDetailsLocalFilters[localKey]);
+    const v = String(value);
+    const isSelected = cur.includes(v);
+
+    if (isMultiSelectGesture(event)) {
+        const next = isSelected ? cur.filter(x => x !== v) : [...cur, v];
+        photoDetailsLocalFilters[localKey] = next;
+        return;
+    }
+
+    if (isSelected) {
+        // deselect
+        photoDetailsLocalFilters[localKey] = cur.filter(x => x !== v);
+        return;
+    }
+
+    photoDetailsLocalFilters[localKey] = [v];
+}
+
+function getActivePhotoDetailsLocalKey() {
+    return photoDetailsTemporalMode === 'time_of_day' ? 'time_of_day' : 'day_of_week';
+}
+
+function applySelection(filterType, value, event) {
+    // Default click: single-select (set to exactly one value).
+    // Ctrl/Cmd+click: multi-select toggle (add/remove value).
+    if (isMultiSelectGesture(event)) {
+        setMultiFilterValue(filterType, value);
+        return;
+    }
+
+    // Plain click:
+    // - If value already selected: deselect it (remove from selection; clear filter if last).
+    // - If value not selected: replace with single selection.
+    const current = normalizeToArray(activeFilters[filterType]);
+    const isSelected = current.some(v => v === value);
+
+    if (isSelected) {
+        const next = current.filter(v => v !== value);
+        if (next.length === 0) {
+            delete activeFilters[filterType];
+        } else {
+            activeFilters[filterType] = next;
+        }
+        return;
+    }
+
+    activeFilters[filterType] = [value];
+}
+
+function clearDownstreamFilters(changedFilterType) {
+    // Keep hierarchy behavior exactly the same: any change to an upstream filter clears all downstream filters.
+    if (changedFilterType === 'category') {
+        delete activeFilters.group;
+        delete activeFilters.camera;
+        delete activeFilters.lens;
+        delete activeFilters.lens_type;
+        delete activeFilters.aperture;
+        delete activeFilters.shutter_speed;
+        delete activeFilters.iso;
+        delete activeFilters.focal_length;
+        delete activeFilters.time_of_day;
+    } else if (changedFilterType === 'group') {
+        delete activeFilters.camera;
+        delete activeFilters.lens;
+        delete activeFilters.lens_type;
+        delete activeFilters.aperture;
+        delete activeFilters.shutter_speed;
+        delete activeFilters.iso;
+        delete activeFilters.focal_length;
+        delete activeFilters.time_of_day;
+    } else if (changedFilterType === 'camera') {
+        delete activeFilters.lens;
+        delete activeFilters.lens_type;
+        delete activeFilters.aperture;
+        delete activeFilters.shutter_speed;
+        delete activeFilters.iso;
+        delete activeFilters.focal_length;
+        delete activeFilters.time_of_day;
+    } else if (changedFilterType === 'lens') {
+        delete activeFilters.aperture;
+        delete activeFilters.shutter_speed;
+        delete activeFilters.iso;
+        delete activeFilters.focal_length;
+        delete activeFilters.time_of_day;
+    }
+}
 
 function withoutFilter(filters, filterKey) {
     const next = { ...(filters || {}) };
@@ -1499,7 +1718,84 @@ function buildDefaultFacetAnalyses(analysis) {
     };
 }
 
-function createHistogramChart(canvasId, labels, data, chartTitle, xAxisLabel, color, filterType, rawValues, isPercentage = false, hitRateMetadata = null) {
+function renderCategoryHitRateChartIfVisible() {
+    const sectionEl = document.getElementById('category-hitrate-content');
+    if (!sectionEl || sectionEl.style.display === 'none') return;
+    if (!currentAnalysisData || !currentAnalysisData.metadata || !currentAnalysisData.metadata.categories) return;
+
+    const categoriesWithHitRate = Object.entries(currentAnalysisData.metadata.categories)
+        .filter(([cat, data]) => data.hit_rate !== null && data.hit_rate !== undefined);
+    if (categoriesWithHitRate.length === 0) return;
+
+    const sortedCategoryHitRates = categoriesWithHitRate.sort((a, b) => b[1].hit_rate - a[1].hit_rate);
+    const categoryHitRateMetadata = sortedCategoryHitRates.map(([cat, data]) => ({
+        name: cat,
+        type: 'Category',
+        finalEdits: (data.hit_rate_photos !== undefined && data.hit_rate_photos !== null) ? data.hit_rate_photos : data.photos,
+        totalPhotos: data.raw_photos
+    }));
+
+    const categoryColors = sortedCategoryHitRates.map(([cat]) => {
+        const isSelected = normalizeToArray(activeFilters.category).includes(cat);
+        return isSelected ? 'rgba(34, 197, 94, 0.8)' : 'rgba(34, 197, 94, 0.3)';
+    });
+
+    createHistogramChart(
+        'chart-category-hitrate',
+        sortedCategoryHitRates.map(c => c[0]),
+        sortedCategoryHitRates.map(c => c[1].hit_rate),
+        'Hit Rate by Category',
+        'Category',
+        activeFilters.category ? categoryColors : 'rgba(34, 197, 94, 0.8)',
+        'category',
+        sortedCategoryHitRates.map(c => c[0]),
+        true,
+        categoryHitRateMetadata
+    );
+}
+
+function renderGroupHitRateChartIfVisible() {
+    const sectionEl = document.getElementById('group-hitrate-content');
+    if (!sectionEl || sectionEl.style.display === 'none') return;
+    if (!currentAnalysisData || !currentAnalysisData.metadata || !currentAnalysisData.metadata.groups) return;
+
+    let filteredGroups = Object.entries(currentAnalysisData.metadata.groups);
+    const selectedCatsForGroupHitRateChart = normalizeToArray(activeFilters.category);
+    if (selectedCatsForGroupHitRateChart.length > 0) {
+        filteredGroups = filteredGroups.filter(([grp, data]) => selectedCatsForGroupHitRateChart.includes(data.category));
+    }
+
+    const groupsWithHitRate = filteredGroups.filter(([grp, data]) => data.hit_rate !== null && data.hit_rate !== undefined);
+    if (groupsWithHitRate.length === 0) return;
+
+    const sortedGroupHitRates = groupsWithHitRate.sort((a, b) => b[1].hit_rate - a[1].hit_rate);
+    const groupHitRateMetadata = sortedGroupHitRates.map(([grp, data]) => ({
+        name: grp,
+        type: 'Group',
+        finalEdits: (data.hit_rate_photos !== undefined && data.hit_rate_photos !== null) ? data.hit_rate_photos : data.photos,
+        totalPhotos: data.raw_photos
+    }));
+
+    const groupColors = sortedGroupHitRates.map(([grp]) => {
+        const isSelected = normalizeToArray(activeFilters.group).includes(grp);
+        return isSelected ? 'rgba(34, 197, 94, 0.8)' : 'rgba(34, 197, 94, 0.3)';
+    });
+
+    createHistogramChart(
+        'chart-group-hitrate',
+        sortedGroupHitRates.map(g => g[0]),
+        sortedGroupHitRates.map(g => g[1].hit_rate),
+        'Hit Rate by Group',
+        'Group',
+        activeFilters.group ? groupColors : 'rgba(34, 197, 94, 0.8)',
+        'group',
+        sortedGroupHitRates.map(g => g[0]),
+        true,
+        groupHitRateMetadata
+    );
+}
+
+function createHistogramChart(canvasId, labels, data, chartTitle, xAxisLabel, color, filterType, rawValues, isPercentage = false, hitRateMetadata = null, customClickHandler = null) {
     // Destroy existing chart if it exists
     const existingChart = chartInstances.find(c => c && c.canvas && c.canvas.id === canvasId);
     if (existingChart) {
@@ -1606,7 +1902,7 @@ function createHistogramChart(canvasId, labels, data, chartTitle, xAxisLabel, co
                     beginAtZero: true,
                     title: {
                         display: true,
-                        text: 'Freq',
+                        text: isPercentage ? 'Hit Rate (%)' : 'Freq',
                         color: '#9ca3af',
                         font: {
                             size: 12,
@@ -1656,7 +1952,7 @@ function createHistogramChart(canvasId, labels, data, chartTitle, xAxisLabel, co
     // Add click handler to canvas for filtering (bars and x-axis labels)
     canvas.onclick = (event) => {
         // Skip filtering if no filterType specified (e.g., bucketed zoom ranges)
-        if (!filterType) {
+        if (!filterType && typeof customClickHandler !== 'function') {
             console.log('Filtering disabled for this chart');
             return;
         }
@@ -1708,7 +2004,17 @@ function createHistogramChart(canvasId, labels, data, chartTitle, xAxisLabel, co
         
         if (clickedIndex >= 0) {
             const clickedValue = rawValues[clickedIndex];
-            
+
+            // Custom click handler (e.g., local-only Photo Details filtering)
+            if (typeof customClickHandler === 'function') {
+                customClickHandler(clickedValue, event, {
+                    index: clickedIndex,
+                    label: labels[clickedIndex],
+                    value: data[clickedIndex]
+                });
+                return;
+            }
+
             // Check if this item is disabled (has 0 count)
             if (data[clickedIndex] === 0) {
                 console.log('Cannot select disabled item');
@@ -1717,85 +2023,11 @@ function createHistogramChart(canvasId, labels, data, chartTitle, xAxisLabel, co
             
             console.log('Clicked on:', filterType, '=', clickedValue);
             console.log('Current filters before toggle:', {...activeFilters});
-            
-            // Toggle filter: if already active, remove it; otherwise set it
-            if (activeFilters[filterType] === clickedValue) {
-                delete activeFilters[filterType];
-                // Clear downstream filters based on hierarchy
-                if (filterType === 'category') {
-                    delete activeFilters.group;
-                    delete activeFilters.camera;
-                    delete activeFilters.lens;
-                    delete activeFilters.lens_type;
-                    delete activeFilters.aperture;
-                    delete activeFilters.shutter_speed;
-                    delete activeFilters.iso;
-                    delete activeFilters.focal_length;
-                    delete activeFilters.time_of_day;
-                } else if (filterType === 'group') {
-                    delete activeFilters.camera;
-                    delete activeFilters.lens;
-                    delete activeFilters.lens_type;
-                    delete activeFilters.aperture;
-                    delete activeFilters.shutter_speed;
-                    delete activeFilters.iso;
-                    delete activeFilters.focal_length;
-                    delete activeFilters.time_of_day;
-                } else if (filterType === 'camera') {
-                    delete activeFilters.lens;
-                    delete activeFilters.lens_type;
-                    delete activeFilters.aperture;
-                    delete activeFilters.shutter_speed;
-                    delete activeFilters.iso;
-                    delete activeFilters.focal_length;
-                    delete activeFilters.time_of_day;
-                } else if (filterType === 'lens') {
-                    delete activeFilters.aperture;
-                    delete activeFilters.shutter_speed;
-                    delete activeFilters.iso;
-                    delete activeFilters.focal_length;
-                    delete activeFilters.time_of_day;
-                }
-                console.log('Filter removed');
-            } else {
-                activeFilters[filterType] = clickedValue;
-                // Clear downstream filters based on hierarchy
-                if (filterType === 'category') {
-                    delete activeFilters.group;
-                    delete activeFilters.camera;
-                    delete activeFilters.lens;
-                    delete activeFilters.lens_type;
-                    delete activeFilters.aperture;
-                    delete activeFilters.shutter_speed;
-                    delete activeFilters.iso;
-                    delete activeFilters.focal_length;
-                    delete activeFilters.time_of_day;
-                } else if (filterType === 'group') {
-                    delete activeFilters.camera;
-                    delete activeFilters.lens;
-                    delete activeFilters.lens_type;
-                    delete activeFilters.aperture;
-                    delete activeFilters.shutter_speed;
-                    delete activeFilters.iso;
-                    delete activeFilters.focal_length;
-                    delete activeFilters.time_of_day;
-                } else if (filterType === 'camera') {
-                    delete activeFilters.lens;
-                    delete activeFilters.lens_type;
-                    delete activeFilters.aperture;
-                    delete activeFilters.shutter_speed;
-                    delete activeFilters.iso;
-                    delete activeFilters.focal_length;
-                    delete activeFilters.time_of_day;
-                } else if (filterType === 'lens') {
-                    delete activeFilters.aperture;
-                    delete activeFilters.shutter_speed;
-                    delete activeFilters.iso;
-                    delete activeFilters.focal_length;
-                    delete activeFilters.time_of_day;
-                }
-                console.log('Filter added');
-            }
+
+            // Single-select by default; multi-select only with Ctrl/Cmd+click
+            applySelection(filterType, clickedValue, event);
+            // Clear downstream filters based on hierarchy (same behavior as before)
+            clearDownstreamFilters(filterType);
             
             console.log('Active filters after toggle:', {...activeFilters});
             
@@ -1805,6 +2037,205 @@ function createHistogramChart(canvasId, labels, data, chartTitle, xAxisLabel, co
     };
     
     chartInstances.push(chart);
+    return chart;
+}
+
+function buildPhotoDetailsSectionHtml(analysis) {
+    // Photo Details Section - show actual photo data
+    const safeAnalysis = analysis || {};
+    const photos = Array.isArray(safeAnalysis.photos) ? safeAnalysis.photos : [];
+
+    // Keep a reference to the currently-rendered Photo Details base rows for local-only charting.
+    currentPhotoDetailsPhotos = photos;
+
+    // Apply local-only filter from the Photo Details temporal chart to the table.
+    const activeLocalKey = getActivePhotoDetailsLocalKey();
+    const selectedLocalValues = normalizeToUniqueStringArray(photoDetailsLocalFilters[activeLocalKey]);
+    const photoDetailsTablePhotos = selectedLocalValues.length === 0
+        ? currentPhotoDetailsPhotos
+        : currentPhotoDetailsPhotos.filter(p => {
+            if (activeLocalKey === 'time_of_day') {
+                return selectedLocalValues.includes(String(getPhotoDetailsTimeOfDayBucket(p && p.time_only)));
+            }
+            const day = (p && p.day_of_week && String(p.day_of_week).trim().length > 0) ? String(p.day_of_week).trim() : 'Unknown';
+            return selectedLocalValues.includes(day);
+        });
+
+    currentPhotoDetailsVisiblePhotos = photoDetailsTablePhotos;
+
+    let filterDescription = '';
+    const activeFiltersList = [];
+    if (activeFilters.camera) activeFiltersList.push(`Camera: ${normalizeToArray(activeFilters.camera).join(', ')}`);
+    if (activeFilters.lens) activeFiltersList.push(`Lens: ${normalizeToArray(activeFilters.lens).join(', ')}`);
+    if (activeFilters.aperture) activeFiltersList.push(`Aperture: f/${normalizeToArray(activeFilters.aperture).join(', f/')}`);
+    if (activeFilters.shutter_speed) activeFiltersList.push(`Shutter: ${normalizeToArray(activeFilters.shutter_speed).join(', ')}s`);
+    if (activeFilters.iso) activeFiltersList.push(`ISO: ${normalizeToArray(activeFilters.iso).join(', ')}`);
+    if (activeFilters.focal_length) activeFiltersList.push(`Focal Length: ${normalizeToArray(activeFilters.focal_length).join(', ')}mm`);
+
+    if (activeFiltersList.length > 0) {
+        filterDescription = ` - Filtered (${activeFiltersList.join(', ')})`;
+    }
+
+    const localLabel = (photoDetailsTemporalMode === 'time_of_day') ? 'Time of Day' : 'Day of Week';
+    const localDescription = selectedLocalValues.length > 0 ? ` - Local (${localLabel}: ${selectedLocalValues.join(', ')})` : '';
+
+    const photoCount = photoDetailsTablePhotos ? photoDetailsTablePhotos.length : 0;
+
+    let html = `<div class="result-card" id="photo-details-card">
+        <h3>Photo Details (${photoCount.toLocaleString()} photos)${filterDescription}${localDescription}</h3>
+        <div>`;
+
+    if (photoDetailsTablePhotos && photoDetailsTablePhotos.length > 0) {
+        html += `
+            <div style="max-height: 400px; overflow-y: auto;">
+                <table style="width: 100%; border-collapse: collapse; font-size: 0.9em;">
+                    <thead style="position: sticky; top: 0; background: var(--surface); z-index: 1;">
+                        <tr style="border-bottom: 1px solid rgba(255, 255, 255, 0.1);">
+                            <th style="padding: 8px; text-align: left;">Date</th>
+                            <th style="padding: 8px; text-align: left;">Day</th>
+                            <th style="padding: 8px; text-align: left;">Time</th>
+                            <th style="padding: 8px; text-align: left;">Time of Day</th>
+                            <th style="padding: 8px; text-align: left;">Category</th>
+                            <th style="padding: 8px; text-align: left;">Group</th>
+                            <th style="padding: 8px; text-align: left;">Session</th>
+                            <th style="padding: 8px; text-align: left;">Camera</th>
+                            <th style="padding: 8px; text-align: left;">Lens</th>
+                            <th style="padding: 8px; text-align: center;">Aperture</th>
+                            <th style="padding: 8px; text-align: center;">SS</th>
+                            <th style="padding: 8px; text-align: center;">ISO</th>
+                            <th style="padding: 8px; text-align: center;">Focal Length</th>
+                            <th style="padding: 8px; text-align: left;">Filename</th>
+                            <th style="padding: 8px; text-align: left;">Path</th>
+                        </tr>
+                    </thead>
+                    <tbody>`;
+
+        photoDetailsTablePhotos.forEach((photo, index) => {
+            const rowStyle = index % 2 === 0 ? 'background: rgba(255, 255, 255, 0.02);' : '';
+            html += `
+                        <tr style="${rowStyle}">
+                            <td style="padding: 8px;">${escapeHtml(photo.date_only || 'N/A')}</td>
+                            <td style="padding: 8px;">${escapeHtml(photo.day_of_week || 'N/A')}</td>
+                            <td style="padding: 8px;">${escapeHtml(photo.time_only || 'N/A')}</td>
+                            <td style="padding: 8px;">${escapeHtml(getPhotoDetailsTimeOfDayBucket(photo.time_only) || 'Unknown')}</td>
+                            <td style="padding: 8px;">${escapeHtml(photo.category || 'Uncategorized')}</td>
+                            <td style="padding: 8px;">${escapeHtml(photo.group || 'Ungrouped')}</td>
+                            <td style="padding: 8px;">${escapeHtml(photo.session_name || 'N/A')}</td>
+                            <td style="padding: 8px;">${escapeHtml(photo.camera || 'Unknown')}</td>
+                            <td style="padding: 8px;">${escapeHtml(photo.lens || 'Unknown')}</td>
+                            <td style="padding: 8px; text-align: center;">${photo.aperture ? 'f/' + photo.aperture : 'N/A'}</td>
+                            <td style="padding: 8px; text-align: center;">${photo.shutter_speed || 'N/A'}</td>
+                            <td style="padding: 8px; text-align: center;">${photo.iso || 'N/A'}</td>
+                            <td style="padding: 8px; text-align: center;">${photo.focal_length ? photo.focal_length + 'mm' : 'N/A'}</td>
+                            <td style="padding: 8px;">${escapeHtml(photo.filename || 'N/A')}</td>
+                            <td style="padding: 8px; font-size: 0.85em; color: #9ca3af;">${escapeHtml(photo.file_path || 'N/A')}</td>
+                        </tr>`;
+        });
+
+        html += `
+                    </tbody>
+                </table>
+            </div>
+
+            <div style="margin-top: 15px;">
+                <div style="display: flex; gap: 10px; align-items: center; margin-bottom: 10px;">
+                    <span style="color: #9ca3af; font-size: 0.9em;">Photo Details Chart:</span>
+                    <button id="btn-photo-temporal-dow" onclick="togglePhotoDetailsTemporalMode('day_of_week')" style="padding: 6px 12px; border: none; border-radius: 6px; cursor: pointer; background: rgba(59, 130, 246, 0.8); color: white;">Day of Week</button>
+                    <button id="btn-photo-temporal-tod" onclick="togglePhotoDetailsTemporalMode('time_of_day')" style="padding: 6px 12px; border: none; border-radius: 6px; cursor: pointer; background: rgba(75, 85, 99, 0.5); color: #9ca3af;">Time of Day</button>
+                </div>
+                <div style="position: relative; height: 500px;">
+                    <canvas id="chart-photo-details-temporal"></canvas>
+                </div>
+            </div>`;
+    } else {
+        html += `<p style="padding: 10px; color: #9ca3af;">No photos match the current filters.</p>`;
+    }
+
+    html += `
+        </div>
+    </div>`;
+
+    return html;
+}
+
+window.rerenderPhotoDetailsSection = function() {
+    const analysis = currentFilteredAnalysisData || currentAnalysisData;
+    const card = document.getElementById('photo-details-card');
+    if (!analysis || !card) return;
+
+    card.outerHTML = buildPhotoDetailsSectionHtml(analysis);
+
+    try {
+        updatePhotoDetailsTemporalToggleButtons();
+        renderPhotoDetailsTemporalChart();
+    } catch (e) {
+        console.warn('Photo Details rerender failed:', e);
+    }
+}
+
+function updatePhotoDetailsTemporalToggleButtons() {
+    const dowBtn = document.getElementById('btn-photo-temporal-dow');
+    const todBtn = document.getElementById('btn-photo-temporal-tod');
+
+    // Reset
+    if (dowBtn) {
+        dowBtn.style.background = 'rgba(75, 85, 99, 0.5)';
+        dowBtn.style.color = '#9ca3af';
+    }
+    if (todBtn) {
+        todBtn.style.background = 'rgba(75, 85, 99, 0.5)';
+        todBtn.style.color = '#9ca3af';
+    }
+
+    // Activate
+    if (photoDetailsTemporalMode === 'day_of_week') {
+        if (dowBtn) {
+            dowBtn.style.background = 'rgba(59, 130, 246, 0.8)';
+            dowBtn.style.color = 'white';
+        }
+    } else {
+        if (todBtn) {
+            todBtn.style.background = 'rgba(251, 146, 60, 0.8)';
+            todBtn.style.color = 'white';
+        }
+    }
+}
+
+function renderPhotoDetailsTemporalChart() {
+    // Keep chart distribution stable (like other charts): render from the full Photo Details base rows.
+    // Local selection dims bars and filters the table, but does not change the chart's underlying counts.
+    const sourcePhotos = Array.isArray(currentPhotoDetailsPhotos) ? currentPhotoDetailsPhotos : [];
+
+    // Allow rendering even when empty; Chart.js will show an empty plot.
+    const spec = buildPhotoDetailsTemporalHistogram(sourcePhotos, photoDetailsTemporalMode);
+    const localKey = getActivePhotoDetailsLocalKey();
+    const selected = normalizeToUniqueStringArray(photoDetailsLocalFilters[localKey]);
+    const selectedColor = photoDetailsTemporalMode === 'time_of_day' ? 'rgba(251, 146, 60, 0.8)' : 'rgba(59, 130, 246, 0.8)';
+    const dimColor = photoDetailsTemporalMode === 'time_of_day' ? 'rgba(251, 146, 60, 0.3)' : 'rgba(59, 130, 246, 0.3)';
+    const colors = spec.labels.map(l => {
+        if (selected.length === 0) return selectedColor;
+        return selected.includes(String(l)) ? selectedColor : dimColor;
+    });
+
+    createHistogramChart(
+        'chart-photo-details-temporal',
+        spec.labels,
+        spec.data,
+        spec.title,
+        spec.xAxisLabel,
+        colors,
+        null,
+        spec.labels,
+        false,
+        null,
+        (clickedValue, event) => {
+            const activeKey = getActivePhotoDetailsLocalKey();
+            applyLocalSelection(activeKey, clickedValue, event);
+            if (typeof window.rerenderPhotoDetailsSection === 'function') {
+                window.rerenderPhotoDetailsSection();
+            }
+        }
+    );
 }
 
 // Apply active filters and redraw all charts
@@ -1880,12 +2311,16 @@ function displayActiveFilters() {
             'group': 'Group'
         };
         
-        const badges = Object.entries(activeFilters).map(([type, value]) => {
+        const badges = Object.entries(activeFilters).flatMap(([type, value]) => {
             const label = filterLabels[type] || type;
-            return `<span style="display: inline-block; margin: 5px; padding: 5px 10px; background: rgba(59, 130, 246, 0.8); color: white; border-radius: 15px; font-size: 0.9em;">
-                ${label}: ${value} 
-                <button onclick="removeFilter('${type}')" style="background: none; border: none; color: white; cursor: pointer; font-weight: bold; margin-left: 5px;">×</button>
-            </span>`;
+            const values = normalizeToArray(value);
+            return values.map(v => {
+                const escaped = String(v).replace(/'/g, "\\'");
+                return `<span style="display: inline-block; margin: 5px; padding: 5px 10px; background: rgba(59, 130, 246, 0.8); color: white; border-radius: 15px; font-size: 0.9em;">
+                    ${label}: ${v} 
+                    <button onclick="removeFilter('${type}', '${escaped}')" style="background: none; border: none; color: white; cursor: pointer; font-weight: bold; margin-left: 5px;">×</button>
+                </span>`;
+            });
         }).join('');
         
         filterBadges += badges;
@@ -1907,8 +2342,22 @@ function displayActiveFilters() {
 }
 
 // Remove a specific filter
-window.removeFilter = function(filterType) {
-    delete activeFilters[filterType];
+window.removeFilter = function(filterType, value = null) {
+    if (value === null || value === undefined) {
+        delete activeFilters[filterType];
+    } else {
+        // Remove a single value from a multi-select filter.
+        const values = normalizeToArray(activeFilters[filterType]);
+        const next = values.filter(v => String(v) !== String(value));
+        if (next.length === 0) {
+            delete activeFilters[filterType];
+        } else {
+            activeFilters[filterType] = next;
+        }
+    }
+
+    // Maintain the same hierarchy behavior: upstream changes clear downstream.
+    clearDownstreamFilters(filterType);
     applyFiltersAndRedraw();
 }
 
@@ -1949,6 +2398,16 @@ window.toggleSection = function(sectionId) {
             content.style.display = 'block';
             if (arrow) arrow.style.transform = 'rotate(180deg)';
             expandedSections[sectionId] = true;
+
+            // Lazy-render hit-rate charts on expand (they size wrong when created hidden).
+            if (sectionId === 'category-hitrate-content') {
+                renderCategoryHitRateChartIfVisible();
+            } else if (sectionId === 'group-hitrate-content') {
+                renderGroupHitRateChartIfVisible();
+            }
+
+            // If charts were created while this section was collapsed, reflow them now.
+            requestChartResize();
         } else {
             content.style.display = 'none';
             if (arrow) arrow.style.transform = 'rotate(0deg)';
@@ -2014,6 +2473,21 @@ window.toggleLensType = function(type) {
     applyFiltersAndRedraw();
 }
 
+// Toggle Photo Details temporal chart mode (derived only from Photo Details table rows)
+window.togglePhotoDetailsTemporalMode = function(mode) {
+    photoDetailsTemporalMode = mode === 'time_of_day' ? 'time_of_day' : 'day_of_week';
+
+    // Switching mode changes which local filter applies to the table, so rerender the section.
+    if (typeof window.rerenderPhotoDetailsSection === 'function') {
+        window.rerenderPhotoDetailsSection();
+        return;
+    }
+
+    // Fallback (shouldn't happen): just update buttons + chart.
+    updatePhotoDetailsTemporalToggleButtons();
+    renderPhotoDetailsTemporalChart();
+}
+
 function displayAnalysisResults(analysis, facets = null) {
     const resultsArea = document.getElementById('analyze-results');
     resultsArea.classList.add('visible');
@@ -2036,15 +2510,24 @@ function displayAnalysisResults(analysis, facets = null) {
     console.log('analysis.camera_freq:', analysis.camera_freq);
     console.log('Has filters?', Object.keys(activeFilters).length > 0);
 
+    const formatSelectionLabel = (value, pluralLabel) => {
+        const values = normalizeToArray(value);
+        if (values.length === 0) return null;
+        if (values.length === 1) return String(values[0]);
+        return `Multiple ${pluralLabel}`;
+    };
+
     // Determine the title based on query parameters
     let mainTitle = 'Analysis Complete';
-    if (analysis.query_category && !analysis.query_group) {
-        mainTitle = `${analysis.query_category.charAt(0).toUpperCase() + analysis.query_category.slice(1)} - All Groups`;
-    } else if (analysis.query_group && !analysis.query_category) {
-        mainTitle = analysis.query_group;
-    } else if (analysis.query_category && analysis.query_group) {
-        mainTitle = `${analysis.query_category.charAt(0).toUpperCase() + analysis.query_category.slice(1)} - ${analysis.query_group}`;
-    } else if (!analysis.query_category && !analysis.query_group) {
+    const categoryLabel = formatSelectionLabel(analysis.query_category, 'Categories');
+    const groupLabel = formatSelectionLabel(analysis.query_group, 'Groups');
+    if (categoryLabel && !groupLabel) {
+        mainTitle = `${categoryLabel} - All Groups`;
+    } else if (groupLabel && !categoryLabel) {
+        mainTitle = groupLabel;
+    } else if (categoryLabel && groupLabel) {
+        mainTitle = `${categoryLabel} - ${groupLabel}`;
+    } else if (!categoryLabel && !groupLabel) {
         mainTitle = 'All Data';
     }
 
@@ -2066,7 +2549,7 @@ function displayAnalysisResults(analysis, facets = null) {
     
     html += `
         <div class="result-card">
-            <h3>Overview${analysis.query_category ? ' - ' + analysis.query_category.charAt(0).toUpperCase() + analysis.query_category.slice(1) : ''}</h3>
+            <h3>Overview${categoryLabel ? ' - ' + categoryLabel : ''}</h3>
             <div class="stat-grid">
                 <div class="stat-item">
                     <div class="stat-label">Total Photos</div>
@@ -2102,17 +2585,20 @@ function displayAnalysisResults(analysis, facets = null) {
             .sort((a, b) => b[1].photos - a[1].photos);
         
         // Determine which category to highlight
-        let highlightCategory = activeFilters.category;
+        const selectedCategories = normalizeToArray(activeFilters.category);
+        let highlightCategory = selectedCategories.length > 0 ? selectedCategories[0] : null;
+
         // If a group is selected but no category, highlight the group's parent category
         const groupToCategory = (currentAnalysisData.metadata && currentAnalysisData.metadata.group_to_category)
             ? currentAnalysisData.metadata.group_to_category
             : ((analysis.metadata && analysis.metadata.group_to_category) ? analysis.metadata.group_to_category : null);
-        if (!highlightCategory && activeFilters.group && groupToCategory) {
-            highlightCategory = groupToCategory[activeFilters.group];
+        const selectedGroupsForHighlight = normalizeToArray(activeFilters.group);
+        if (!highlightCategory && selectedGroupsForHighlight.length > 0 && groupToCategory) {
+            highlightCategory = groupToCategory[selectedGroupsForHighlight[0]];
         }
         
         sortedCats.forEach(([cat, baseData]) => {
-            const isActive = highlightCategory === cat;
+            const isActive = selectedCategories.includes(cat) || highlightCategory === cat;
             const activeStyle = isActive ? 'border: 2px solid rgba(59, 130, 246, 0.9); background-color: rgba(59, 130, 246, 0.15);' : 'border: 2px solid transparent;';
             const facetData = categoryFacetCategories[cat];
             const displaySessions = facetData ? facetData.sessions : 0;
@@ -2145,7 +2631,8 @@ function displayAnalysisResults(analysis, facets = null) {
             const sortedCategoryHitRates = categoriesWithHitRate.sort((a, b) => b[1].hit_rate - a[1].hit_rate);
             
             sortedCategoryHitRates.forEach(([cat, data]) => {
-                html += `<p><strong>${escapeHtml(cat)}:</strong> ${data.hit_rate.toFixed(1)}% (${data.photos} / ${data.raw_photos})</p>`;
+                const numerator = (data.hit_rate_photos !== undefined && data.hit_rate_photos !== null) ? data.hit_rate_photos : data.photos;
+                html += `<p><strong>${escapeHtml(cat)}:</strong> ${data.hit_rate.toFixed(1)}% (${numerator} / ${data.raw_photos})</p>`;
             });
             html += `</div><div><canvas id="${chartId}" style="height: 350px;"></canvas></div></div></div></div>`;
         }
@@ -2160,13 +2647,15 @@ function displayAnalysisResults(analysis, facets = null) {
         
         // Filter groups by selected category
         let filteredGroups = Object.entries(currentAnalysisData.metadata.groups);
-        if (activeFilters.category) {
-            filteredGroups = filteredGroups.filter(([grp, data]) => data.category === activeFilters.category);
+        const selectedCatsForGroups = normalizeToArray(activeFilters.category);
+        if (selectedCatsForGroups.length > 0) {
+            filteredGroups = filteredGroups.filter(([grp, data]) => selectedCatsForGroups.includes(data.category));
         }
         
         const sortedGroups = filteredGroups.sort((a, b) => b[1].photos - a[1].photos);
+        const selectedGroups = normalizeToArray(activeFilters.group);
         sortedGroups.forEach(([grp, baseData]) => {
-            const isActive = activeFilters.group === grp;
+            const isActive = selectedGroups.includes(grp);
             const activeStyle = isActive ? 'border: 2px solid rgba(59, 130, 246, 0.9); background-color: rgba(59, 130, 246, 0.15);' : 'border: 2px solid transparent;';
             const facetData = groupFacetGroups[grp];
             const displaySessions = facetData ? facetData.sessions : 0;
@@ -2181,8 +2670,9 @@ function displayAnalysisResults(analysis, facets = null) {
     if (currentAnalysisData && currentAnalysisData.metadata && currentAnalysisData.metadata.groups) {
         // Filter groups by selected category if one is active
         let filteredGroups = Object.entries(currentAnalysisData.metadata.groups);
-        if (activeFilters.category) {
-            filteredGroups = filteredGroups.filter(([grp, data]) => data.category === activeFilters.category);
+        const selectedCatsForGroupHitRate = normalizeToArray(activeFilters.category);
+        if (selectedCatsForGroupHitRate.length > 0) {
+            filteredGroups = filteredGroups.filter(([grp, data]) => selectedCatsForGroupHitRate.includes(data.category));
         }
         
         const groupsWithHitRate = filteredGroups.filter(([grp, data]) => data.hit_rate !== null && data.hit_rate !== undefined);
@@ -2196,7 +2686,7 @@ function displayAnalysisResults(analysis, facets = null) {
             html += `<div class="result-card">
                 <h3 style="cursor: pointer; user-select: none; display: flex; align-items: center; gap: 10px;" onclick="toggleSection('${sectionId}')">
                     <span id="group-hitrate-arrow" style="transition: transform 0.3s; transform: ${arrowRotation};">▼</span>
-                    Hit Rate by Group${activeFilters.category ? ' - ' + activeFilters.category.charAt(0).toUpperCase() + activeFilters.category.slice(1) : ''}
+                    Hit Rate by Group${normalizeToArray(activeFilters.category).length > 0 ? ' - Multiple Categories' : ''}
                 </h3>
                 <div id="${sectionId}" style="display: ${displayStyle};">
                     <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; align-items: start;">
@@ -2204,95 +2694,16 @@ function displayAnalysisResults(analysis, facets = null) {
             const sortedGroupHitRates = groupsWithHitRate.sort((a, b) => b[1].hit_rate - a[1].hit_rate);
             
             sortedGroupHitRates.forEach(([grp, data]) => {
-                html += `<p><strong>${escapeHtml(grp)}:</strong> ${data.hit_rate.toFixed(1)}% (${data.photos} / ${data.raw_photos})</p>`;
+                const numerator = (data.hit_rate_photos !== undefined && data.hit_rate_photos !== null) ? data.hit_rate_photos : data.photos;
+                html += `<p><strong>${escapeHtml(grp)}:</strong> ${data.hit_rate.toFixed(1)}% (${numerator} / ${data.raw_photos})</p>`;
             });
             html += `</div><div><canvas id="${chartId}" style="height: 350px;"></canvas></div></div></div></div>`;
         }
     }
 
     // Photo Details Section - show actual photo data
-    console.log('[PHOTO_DETAILS] analysis.photos:', analysis.photos);
-    console.log('[PHOTO_DETAILS] photos length:', analysis.photos ? analysis.photos.length : 'undefined');
-    console.log('[PHOTO_DETAILS] activeFilters:', activeFilters);
-    
     if (analysis.photos !== undefined) {
-        console.log('[PHOTO_DETAILS] Rendering photo details section');
-        
-        let filterDescription = '';
-        const activeFiltersList = [];
-        if (activeFilters.camera) activeFiltersList.push(`Camera: ${activeFilters.camera}`);
-        if (activeFilters.lens) activeFiltersList.push(`Lens: ${activeFilters.lens}`);
-        if (activeFilters.aperture) activeFiltersList.push(`Aperture: f/${activeFilters.aperture}`);
-        if (activeFilters.shutter_speed) activeFiltersList.push(`Shutter: ${activeFilters.shutter_speed}s`);
-        if (activeFilters.iso) activeFiltersList.push(`ISO: ${activeFilters.iso}`);
-        if (activeFilters.focal_length) activeFiltersList.push(`Focal Length: ${activeFilters.focal_length}mm`);
-        
-        if (activeFiltersList.length > 0) {
-            filterDescription = ` - Filtered (${activeFiltersList.join(', ')})`;
-        }
-        
-        const photoCount = analysis.photos ? analysis.photos.length : 0;
-        
-        html += `<div class="result-card">
-            <h3>Photo Details (${photoCount.toLocaleString()} photos)${filterDescription}</h3>
-            <div>`;
-        
-        if (analysis.photos && analysis.photos.length > 0) {
-            html += `
-                <div style="max-height: 400px; overflow-y: auto;">
-                    <table style="width: 100%; border-collapse: collapse; font-size: 0.9em;">
-                        <thead style="position: sticky; top: 0; background: var(--surface); z-index: 1;">
-                            <tr style="border-bottom: 1px solid rgba(255, 255, 255, 0.1);">
-                                <th style="padding: 8px; text-align: left;">Date</th>
-                                <th style="padding: 8px; text-align: left;">Day</th>
-                                <th style="padding: 8px; text-align: left;">Time</th>
-                                <th style="padding: 8px; text-align: left;">Category</th>
-                                <th style="padding: 8px; text-align: left;">Group</th>
-                                <th style="padding: 8px; text-align: left;">Session</th>
-                                <th style="padding: 8px; text-align: left;">Camera</th>
-                                <th style="padding: 8px; text-align: left;">Lens</th>
-                                <th style="padding: 8px; text-align: center;">Aperture</th>
-                                <th style="padding: 8px; text-align: center;">SS</th>
-                                <th style="padding: 8px; text-align: center;">ISO</th>
-                                <th style="padding: 8px; text-align: center;">Focal Length</th>
-                                <th style="padding: 8px; text-align: left;">Filename</th>
-                                <th style="padding: 8px; text-align: left;">Path</th>
-                            </tr>
-                        </thead>
-                        <tbody>`;
-            
-            analysis.photos.forEach((photo, index) => {
-                const rowStyle = index % 2 === 0 ? 'background: rgba(255, 255, 255, 0.02);' : '';
-                html += `
-                            <tr style="${rowStyle}">
-                                <td style="padding: 8px;">${escapeHtml(photo.date_only || 'N/A')}</td>
-                                <td style="padding: 8px;">${escapeHtml(photo.day_of_week || 'N/A')}</td>
-                                <td style="padding: 8px;">${escapeHtml(photo.time_only || 'N/A')}</td>
-                                <td style="padding: 8px;">${escapeHtml(photo.category || 'Uncategorized')}</td>
-                                <td style="padding: 8px;">${escapeHtml(photo.group || 'Ungrouped')}</td>
-                                <td style="padding: 8px;">${escapeHtml(photo.session_name || 'N/A')}</td>
-                                <td style="padding: 8px;">${escapeHtml(photo.camera || 'Unknown')}</td>
-                                <td style="padding: 8px;">${escapeHtml(photo.lens || 'Unknown')}</td>
-                                <td style="padding: 8px; text-align: center;">${photo.aperture ? 'f/' + photo.aperture : 'N/A'}</td>
-                                <td style="padding: 8px; text-align: center;">${photo.shutter_speed || 'N/A'}</td>
-                                <td style="padding: 8px; text-align: center;">${photo.iso || 'N/A'}</td>
-                                <td style="padding: 8px; text-align: center;">${photo.focal_length ? photo.focal_length + 'mm' : 'N/A'}</td>
-                                <td style="padding: 8px;">${escapeHtml(photo.filename || 'N/A')}</td>
-                                <td style="padding: 8px; font-size: 0.85em; color: #9ca3af;">${escapeHtml(photo.file_path || 'N/A')}</td>
-                            </tr>`;
-            });
-            
-            html += `
-                        </tbody>
-                    </table>
-                </div>`;
-        } else {
-            html += `<p style="padding: 10px; color: #9ca3af;">No photos match the current filters.</p>`;
-        }
-        
-        html += `
-            </div>
-        </div>`;
+        html += buildPhotoDetailsSectionHtml(analysis);
     }
 
     // Camera Bodies - show all from baseline, counts from camera facet (all filters except camera)
@@ -2311,7 +2722,7 @@ function displayAnalysisResults(analysis, facets = null) {
                                      activeFilters.focal_length;
         
         cameras.forEach(([camera, count]) => {
-            const isActive = activeFilters.camera === camera;
+            const isActive = normalizeToArray(activeFilters.camera).includes(camera);
             // Faceted counts: all active filters EXCEPT camera
             const displayCount = cameraFacetFreq[camera] || 0;
             const percentage = displayCount > 0 && cameraFacetTotal > 0 ? ((displayCount / cameraFacetTotal) * 100).toFixed(1) : '0.0';
@@ -2347,7 +2758,7 @@ function displayAnalysisResults(analysis, facets = null) {
                                      activeFilters.iso || activeFilters.focal_length;
         
         lenses.forEach(([lens, count]) => {
-            const isActive = activeFilters.lens === lens;
+            const isActive = normalizeToArray(activeFilters.lens).includes(lens);
             // Faceted counts: all active filters EXCEPT lens
             const displayCount = lensFacetFreq[lens] || 0;
             const percentage = displayCount > 0 && lensFacetTotal > 0 ? ((displayCount / lensFacetTotal) * 100).toFixed(1) : '0.0';
@@ -2374,7 +2785,7 @@ function displayAnalysisResults(analysis, facets = null) {
             });
         
         apertures.forEach(([aperture, count]) => {
-            const isActive = activeFilters.aperture === aperture;
+            const isActive = normalizeToArray(activeFilters.aperture).includes(aperture);
             const displayCount = apertureFacetFreq[aperture] || 0;
             const isAvailable = displayCount > 0;
             const percentage = isAvailable && apertureFacetTotal > 0 ? ((displayCount / apertureFacetTotal) * 100).toFixed(1) : '0.0';
@@ -2403,7 +2814,7 @@ function displayAnalysisResults(analysis, facets = null) {
             .sort((a, b) => parseShutterSpeed(a[0]) - parseShutterSpeed(b[0])); // Ascending order
         
         shutters.forEach(([shutter, count]) => {
-            const isActive = activeFilters.shutter_speed === shutter;
+            const isActive = normalizeToArray(activeFilters.shutter_speed).includes(shutter);
             const displayCount = shutterFacetFreq[shutter] || 0;
             const isAvailable = displayCount > 0;
             const percentage = isAvailable && shutterFacetTotal > 0 ? ((displayCount / shutterFacetTotal) * 100).toFixed(1) : '0.0';
@@ -2425,7 +2836,7 @@ function displayAnalysisResults(analysis, facets = null) {
             .sort((a, b) => parseInt(a[0]) - parseInt(b[0])); // Ascending order (smallest to largest)
         
         isos.forEach(([iso, count]) => {
-            const isActive = activeFilters.iso === iso;
+            const isActive = normalizeToArray(activeFilters.iso).includes(iso);
             const displayCount = isoFacetFreq[iso] || 0;
             const isAvailable = displayCount > 0;
             const percentage = isAvailable && isoFacetTotal > 0 ? ((displayCount / isoFacetTotal) * 100).toFixed(1) : '0.0';
@@ -2472,10 +2883,12 @@ function displayAnalysisResults(analysis, facets = null) {
             html += `<div class="result-card"><h3>Prime Focal Lengths</h3><div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; align-items: start;"><div style="max-height: 400px; overflow-y: auto;">`;
             const sortedPrimes = Object.entries(primes)
                 .sort((a, b) => parseFloat(a[0]) - parseFloat(b[0]));
+
+            const selectedFocals = normalizeToArray(activeFilters.focal_length);
             
             sortedPrimes.forEach(([focal, count]) => {
                 const focalDisplay = parseInt(focal); // Remove decimals for primes
-                const isActive = activeFilters.focal_length === focal;
+                const isActive = selectedFocals.includes(focal);
                 const displayCount = focalFacetFreq[focal] || 0;
                 const isAvailable = displayCount > 0;
                 const percentage = isAvailable && focalFacetTotal > 0 ? ((displayCount / focalFacetTotal) * 100).toFixed(1) : '0.0';
@@ -2538,7 +2951,7 @@ function displayAnalysisResults(analysis, facets = null) {
             const displayCount = timeFacetFreq[time] || 0;
             const isAvailable = displayCount > 0;
             const percentage = isAvailable && timeFacetTotal > 0 ? ((displayCount / timeFacetTotal) * 100).toFixed(1) : '0.0';
-            const isActive = activeFilters.time_of_day === time;
+            const isActive = normalizeToArray(activeFilters.time_of_day).includes(time);
             const activeStyle = isActive ? 'border: 2px solid rgba(59, 130, 246, 0.9); background-color: rgba(59, 130, 246, 0.15); border-radius: 8px;' : '';
             const dimStyle = !isAvailable ? 'opacity: 0.3; cursor: not-allowed;' : '';
             html += `<p class="clickable-time" data-time="${escapeHtml(time)}" style="margin: 0; cursor: pointer; padding: 5px; transition: all 0.2s; ${activeStyle} ${dimStyle}"><strong>${time}:</strong> ${displayCount} photos (${percentage}%)</p>`;
@@ -2562,75 +2975,18 @@ function displayAnalysisResults(analysis, facets = null) {
     
     // Render all charts after HTML is inserted
     setTimeout(() => {
-        // Category Hit Rate Chart - use currentAnalysisData for full metadata
-        if (currentAnalysisData && currentAnalysisData.metadata && currentAnalysisData.metadata.categories) {
-            const categoriesWithHitRate = Object.entries(currentAnalysisData.metadata.categories)
-                .filter(([cat, data]) => data.hit_rate !== null && data.hit_rate !== undefined);
-            
-            if (categoriesWithHitRate.length > 0) {
-                const sortedCategoryHitRates = categoriesWithHitRate.sort((a, b) => b[1].hit_rate - a[1].hit_rate);
-                const categoryHitRateMetadata = sortedCategoryHitRates.map(([cat, data]) => ({
-                    name: cat,
-                    type: 'Category',
-                    finalEdits: data.photos,
-                    totalPhotos: data.raw_photos
-                }));
-                // Create color array - lighter for non-selected, normal for selected
-                const categoryColors = sortedCategoryHitRates.map(([cat, data]) => {
-                    const isSelected = activeFilters.category === cat;
-                    return isSelected ? 'rgba(34, 197, 94, 0.8)' : 'rgba(34, 197, 94, 0.3)';
-                });
-                createHistogramChart(
-                    'chart-category-hitrate',
-                    sortedCategoryHitRates.map(c => c[0]),
-                    sortedCategoryHitRates.map(c => c[1].hit_rate),
-                    'Hit Rate by Category',
-                    'Category',
-                    activeFilters.category ? categoryColors : 'rgba(34, 197, 94, 0.8)',
-                    'category',
-                    sortedCategoryHitRates.map(c => c[0]),
-                    true,  // isPercentage
-                    categoryHitRateMetadata
-                );
+        // Photo Details temporal chart (derived ONLY from Photo Details rows)
+        if (typeof window.togglePhotoDetailsTemporalMode === 'function') {
+            try {
+                window.togglePhotoDetailsTemporalMode(photoDetailsTemporalMode);
+            } catch (e) {
+                console.warn('Photo Details temporal toggle restore failed:', e);
             }
         }
-        
-        // Group Hit Rate Chart - use currentAnalysisData for full metadata
-        if (currentAnalysisData && currentAnalysisData.metadata && currentAnalysisData.metadata.groups) {
-            let filteredGroups = Object.entries(currentAnalysisData.metadata.groups);
-            if (activeFilters.category) {
-                filteredGroups = filteredGroups.filter(([grp, data]) => data.category === activeFilters.category);
-            }
-            
-            const groupsWithHitRate = filteredGroups.filter(([grp, data]) => data.hit_rate !== null && data.hit_rate !== undefined);
-            
-            if (groupsWithHitRate.length > 0) {
-                const sortedGroupHitRates = groupsWithHitRate.sort((a, b) => b[1].hit_rate - a[1].hit_rate);
-                const groupHitRateMetadata = sortedGroupHitRates.map(([grp, data]) => ({
-                    name: grp,
-                    type: 'Group',
-                    finalEdits: data.photos,
-                    totalPhotos: data.raw_photos
-                }));
-                // Create color array - lighter for non-selected, normal for selected
-                const groupColors = sortedGroupHitRates.map(([grp, data]) => {
-                    const isSelected = activeFilters.group === grp;
-                    return isSelected ? 'rgba(34, 197, 94, 0.8)' : 'rgba(34, 197, 94, 0.3)';
-                });
-                createHistogramChart(
-                    'chart-group-hitrate',
-                    sortedGroupHitRates.map(g => g[0]),
-                    sortedGroupHitRates.map(g => g[1].hit_rate),
-                    'Hit Rate by Group',
-                    'Group',
-                    activeFilters.group ? groupColors : 'rgba(34, 197, 94, 0.8)',
-                    'group',
-                    sortedGroupHitRates.map(g => g[0]),
-                    true,  // isPercentage
-                    groupHitRateMetadata
-                );
-            }
-        }
+
+        // Hit-rate charts live in collapsible sections: only render when visible to avoid wrong initial sizing.
+        renderCategoryHitRateChartIfVisible();
+        renderGroupHitRateChartIfVisible();
         
         if (currentAnalysisData && currentAnalysisData.camera_freq && Object.keys(currentAnalysisData.camera_freq).length > 0) {
             const cameras = Object.entries(currentAnalysisData.camera_freq).sort((a, b) => b[1] - a[1]);
@@ -2643,7 +2999,7 @@ function displayAnalysisResults(analysis, facets = null) {
             });
             const cameraColors = cameras.map(([cam, count]) => {
                 if (activeFilters.camera) {
-                    const isSelected = activeFilters.camera === cam;
+                    const isSelected = normalizeToArray(activeFilters.camera).includes(cam);
                     return isSelected ? 'rgba(59, 130, 246, 0.8)' : 'rgba(59, 130, 246, 0.3)';
                 }
                 return 'rgba(59, 130, 246, 0.8)';
@@ -2661,7 +3017,7 @@ function displayAnalysisResults(analysis, facets = null) {
             });
             const lensColors = lenses.map(([lens, count]) => {
                 if (activeFilters.lens) {
-                    const isSelected = activeFilters.lens === lens;
+                    const isSelected = normalizeToArray(activeFilters.lens).includes(lens);
                     return isSelected ? 'rgba(147, 51, 234, 0.8)' : 'rgba(147, 51, 234, 0.3)';
                 }
                 return 'rgba(147, 51, 234, 0.8)';
@@ -2680,7 +3036,7 @@ function displayAnalysisResults(analysis, facets = null) {
             });
             const apertureColors = apertures.map(([aperture, count]) => {
                 if (activeFilters.aperture) {
-                    const isSelected = activeFilters.aperture === aperture;
+                    const isSelected = normalizeToArray(activeFilters.aperture).includes(aperture);
                     return isSelected ? 'rgba(59, 130, 246, 0.8)' : 'rgba(59, 130, 246, 0.3)';
                 }
                 return 'rgba(59, 130, 246, 0.8)';
@@ -2706,7 +3062,7 @@ function displayAnalysisResults(analysis, facets = null) {
             });
             const shutterColors = shutters.map(([shutter, count]) => {
                 if (activeFilters.shutter_speed) {
-                    const isSelected = activeFilters.shutter_speed === shutter;
+                    const isSelected = normalizeToArray(activeFilters.shutter_speed).includes(shutter);
                     return isSelected ? 'rgba(168, 85, 247, 0.8)' : 'rgba(168, 85, 247, 0.3)';
                 }
                 return 'rgba(168, 85, 247, 0.8)';
@@ -2725,7 +3081,7 @@ function displayAnalysisResults(analysis, facets = null) {
             });
             const isoColors = isos.map(([iso, count]) => {
                 if (activeFilters.iso) {
-                    const isSelected = activeFilters.iso === iso;
+                    const isSelected = normalizeToArray(activeFilters.iso).includes(iso);
                     return isSelected ? 'rgba(14, 165, 233, 0.8)' : 'rgba(14, 165, 233, 0.3)';
                 }
                 return 'rgba(14, 165, 233, 0.8)';
@@ -2759,7 +3115,7 @@ function displayAnalysisResults(analysis, facets = null) {
                 });
                 const primeColors = sortedPrimes.map(([focal, count]) => {
                     if (activeFilters.focal_length) {
-                        const isSelected = activeFilters.focal_length === focal;
+                        const isSelected = normalizeToArray(activeFilters.focal_length).includes(focal);
                         return isSelected ? 'rgba(236, 72, 153, 0.8)' : 'rgba(236, 72, 153, 0.3)';
                     }
                     return 'rgba(236, 72, 153, 0.8)';
@@ -2803,13 +3159,16 @@ function displayAnalysisResults(analysis, facets = null) {
             });
             const timeColors = times.map(([time, count]) => {
                 if (activeFilters.time_of_day) {
-                    const isSelected = activeFilters.time_of_day === time;
+                    const isSelected = normalizeToArray(activeFilters.time_of_day).includes(time);
                     return isSelected ? 'rgba(251, 146, 60, 0.8)' : 'rgba(251, 146, 60, 0.3)';
                 }
                 return 'rgba(251, 146, 60, 0.8)';
             });
             createHistogramChart('chart-timeofday', times.map(t => t[0]), timeData, 'Time of Day', 'Time Period', timeColors, 'time_of_day', times.map(t => t[0]));
         }
+
+        // Second-pass reflow: helps when charts were created before final layout.
+        requestChartResize();
         
         // Restore lens type button states after HTML re-render
         updateLensTypeButtons();
@@ -2817,49 +3176,25 @@ function displayAnalysisResults(analysis, facets = null) {
         // Add single-click handlers for categories and groups
         document.querySelectorAll('.clickable-category').forEach(elem => {
             const category = elem.getAttribute('data-category');
-            const isActive = activeFilters.category === category;
+            const isActive = category ? normalizeToArray(activeFilters.category).includes(category) : false;
             const isDisabled = elem.style.opacity === '0.3';
             
-            elem.addEventListener('click', () => {
+            elem.addEventListener('click', (event) => {
                 if (category && !isDisabled) {
-                    // Toggle: if already selected, deselect it; otherwise select it
-                    if (activeFilters.category === category) {
-                        delete activeFilters.category;
-                        // Clear all downstream filters when deselecting category
-                        delete activeFilters.group;
-                        delete activeFilters.camera;
-                        delete activeFilters.lens;
-                        delete activeFilters.lens_type;
-                        delete activeFilters.aperture;
-                        delete activeFilters.shutter_speed;
-                        delete activeFilters.iso;
-                        delete activeFilters.focal_length;
-                        delete activeFilters.time_of_day;
-                    } else {
-                        activeFilters.category = category;
-                        // Clear all downstream filters when selecting a different category
-                        delete activeFilters.group;
-                        delete activeFilters.camera;
-                        delete activeFilters.lens;
-                        delete activeFilters.lens_type;
-                        delete activeFilters.aperture;
-                        delete activeFilters.shutter_speed;
-                        delete activeFilters.iso;
-                        delete activeFilters.focal_length;
-                        delete activeFilters.time_of_day;
-                    }
+                    applySelection('category', category, event);
+                    clearDownstreamFilters('category');
                     applyFiltersAndRedraw();
                 }
             });
             
             // Hover effect - only if not active
             elem.addEventListener('mouseenter', () => {
-                if (!isActive && !isDisabled) {
+                if (!(category && normalizeToArray(activeFilters.category).includes(category)) && !isDisabled) {
                     elem.style.backgroundColor = 'rgba(59, 130, 246, 0.1)';
                 }
             });
             elem.addEventListener('mouseleave', () => {
-                if (!isActive && !isDisabled) {
+                if (!(category && normalizeToArray(activeFilters.category).includes(category)) && !isDisabled) {
                     elem.style.backgroundColor = 'transparent';
                 }
             });
@@ -2867,47 +3202,25 @@ function displayAnalysisResults(analysis, facets = null) {
         
         document.querySelectorAll('.clickable-group').forEach(elem => {
             const group = elem.getAttribute('data-group');
-            const isActive = activeFilters.group === group;
+            const isActive = group ? normalizeToArray(activeFilters.group).includes(group) : false;
             const isDisabled = elem.style.opacity === '0.3';
             
-            elem.addEventListener('click', () => {
+            elem.addEventListener('click', (event) => {
                 if (group && !isDisabled) {
-                    // Toggle: if already selected, deselect it; otherwise select it
-                    if (activeFilters.group === group) {
-                        delete activeFilters.group;
-                        // Clear all downstream filters when deselecting group
-                        delete activeFilters.camera;
-                        delete activeFilters.lens;
-                        delete activeFilters.lens_type;
-                        delete activeFilters.aperture;
-                        delete activeFilters.shutter_speed;
-                        delete activeFilters.iso;
-                        delete activeFilters.focal_length;
-                        delete activeFilters.time_of_day;
-                    } else {
-                        activeFilters.group = group;
-                        // Clear all downstream filters when selecting a different group
-                        delete activeFilters.camera;
-                        delete activeFilters.lens;
-                        delete activeFilters.lens_type;
-                        delete activeFilters.aperture;
-                        delete activeFilters.shutter_speed;
-                        delete activeFilters.iso;
-                        delete activeFilters.focal_length;
-                        delete activeFilters.time_of_day;
-                    }
+                    applySelection('group', group, event);
+                    clearDownstreamFilters('group');
                     applyFiltersAndRedraw();
                 }
             });
             
             // Hover effect - only if not active
             elem.addEventListener('mouseenter', () => {
-                if (!isActive && !isDisabled) {
+                if (!(group && normalizeToArray(activeFilters.group).includes(group)) && !isDisabled) {
                     elem.style.backgroundColor = 'rgba(147, 51, 234, 0.1)';
                 }
             });
             elem.addEventListener('mouseleave', () => {
-                if (!isActive && !isDisabled) {
+                if (!(group && normalizeToArray(activeFilters.group).includes(group)) && !isDisabled) {
                     elem.style.backgroundColor = 'transparent';
                 }
             });
@@ -2915,27 +3228,23 @@ function displayAnalysisResults(analysis, facets = null) {
 
         document.querySelectorAll('.clickable-time').forEach(elem => {
             const time = elem.getAttribute('data-time');
-            const isActive = activeFilters.time_of_day === time;
+            const isActive = time ? normalizeToArray(activeFilters.time_of_day).includes(time) : false;
             const isDisabled = elem.style.opacity === '0.3';
 
-            elem.addEventListener('click', () => {
+            elem.addEventListener('click', (event) => {
                 if (time && !isDisabled) {
-                    if (activeFilters.time_of_day === time) {
-                        delete activeFilters.time_of_day;
-                    } else {
-                        activeFilters.time_of_day = time;
-                    }
+                    applySelection('time_of_day', time, event);
                     applyFiltersAndRedraw();
                 }
             });
 
             elem.addEventListener('mouseenter', () => {
-                if (!isActive && !isDisabled) {
+                if (!(time && normalizeToArray(activeFilters.time_of_day).includes(time)) && !isDisabled) {
                     elem.style.backgroundColor = 'rgba(59, 130, 246, 0.1)';
                 }
             });
             elem.addEventListener('mouseleave', () => {
-                if (!isActive && !isDisabled) {
+                if (!(time && normalizeToArray(activeFilters.time_of_day).includes(time)) && !isDisabled) {
                     elem.style.backgroundColor = 'transparent';
                 }
             });
@@ -2944,43 +3253,24 @@ function displayAnalysisResults(analysis, facets = null) {
         // Add click handlers for camera bodies
         document.querySelectorAll('.clickable-camera').forEach(elem => {
             const camera = elem.getAttribute('data-camera');
-            const isActive = activeFilters.camera === camera;
+            const isActive = camera ? normalizeToArray(activeFilters.camera).includes(camera) : false;
             const isDisabled = elem.style.opacity === '0.3';
             
-            elem.addEventListener('click', () => {
+            elem.addEventListener('click', (event) => {
                 if (camera && !isDisabled) {
-                    if (activeFilters.camera === camera) {
-                        delete activeFilters.camera;
-                        // Clear all downstream filters when deselecting camera
-                        delete activeFilters.lens;
-                        delete activeFilters.lens_type;
-                        delete activeFilters.aperture;
-                        delete activeFilters.shutter_speed;
-                        delete activeFilters.iso;
-                        delete activeFilters.focal_length;
-                        delete activeFilters.time_of_day;
-                    } else {
-                        activeFilters.camera = camera;
-                        // Clear all downstream filters when selecting a different camera
-                        delete activeFilters.lens;
-                        delete activeFilters.lens_type;
-                        delete activeFilters.aperture;
-                        delete activeFilters.shutter_speed;
-                        delete activeFilters.iso;
-                        delete activeFilters.focal_length;
-                        delete activeFilters.time_of_day;
-                    }
+                    applySelection('camera', camera, event);
+                    clearDownstreamFilters('camera');
                     applyFiltersAndRedraw();
                 }
             });
             
             elem.addEventListener('mouseenter', () => {
-                if (!isActive && !isDisabled) {
+                if (!(camera && normalizeToArray(activeFilters.camera).includes(camera)) && !isDisabled) {
                     elem.style.backgroundColor = 'rgba(59, 130, 246, 0.1)';
                 }
             });
             elem.addEventListener('mouseleave', () => {
-                if (!isActive && !isDisabled) {
+                if (!(camera && normalizeToArray(activeFilters.camera).includes(camera)) && !isDisabled) {
                     elem.style.backgroundColor = 'transparent';
                 }
             });
@@ -2989,39 +3279,24 @@ function displayAnalysisResults(analysis, facets = null) {
         // Add click handlers for lenses
         document.querySelectorAll('.clickable-lens').forEach(elem => {
             const lens = elem.getAttribute('data-lens');
-            const isActive = activeFilters.lens === lens;
+            const isActive = lens ? normalizeToArray(activeFilters.lens).includes(lens) : false;
             const isDisabled = elem.style.opacity === '0.3';
             
-            elem.addEventListener('click', () => {
+            elem.addEventListener('click', (event) => {
                 if (lens && !isDisabled) {
-                    if (activeFilters.lens === lens) {
-                        delete activeFilters.lens;
-                        // Clear all downstream filters when deselecting lens
-                        delete activeFilters.aperture;
-                        delete activeFilters.shutter_speed;
-                        delete activeFilters.iso;
-                        delete activeFilters.focal_length;
-                        delete activeFilters.time_of_day;
-                    } else {
-                        activeFilters.lens = lens;
-                        // Clear all downstream filters when selecting a different lens
-                        delete activeFilters.aperture;
-                        delete activeFilters.shutter_speed;
-                        delete activeFilters.iso;
-                        delete activeFilters.focal_length;
-                        delete activeFilters.time_of_day;
-                    }
+                    applySelection('lens', lens, event);
+                    clearDownstreamFilters('lens');
                     applyFiltersAndRedraw();
                 }
             });
             
             elem.addEventListener('mouseenter', () => {
-                if (!isActive && !isDisabled) {
+                if (!(lens && normalizeToArray(activeFilters.lens).includes(lens)) && !isDisabled) {
                     elem.style.backgroundColor = 'rgba(59, 130, 246, 0.1)';
                 }
             });
             elem.addEventListener('mouseleave', () => {
-                if (!isActive && !isDisabled) {
+                if (!(lens && normalizeToArray(activeFilters.lens).includes(lens)) && !isDisabled) {
                     elem.style.backgroundColor = 'transparent';
                 }
             });
@@ -3030,27 +3305,23 @@ function displayAnalysisResults(analysis, facets = null) {
         // Add click handlers for apertures
         document.querySelectorAll('.clickable-aperture').forEach(elem => {
             const aperture = elem.getAttribute('data-aperture');
-            const isActive = activeFilters.aperture === aperture;
+            const isActive = aperture ? normalizeToArray(activeFilters.aperture).includes(aperture) : false;
             const isDisabled = elem.style.opacity === '0.3';
             
-            elem.addEventListener('click', () => {
+            elem.addEventListener('click', (event) => {
                 if (aperture && !isDisabled) {
-                    if (activeFilters.aperture === aperture) {
-                        delete activeFilters.aperture;
-                    } else {
-                        activeFilters.aperture = aperture;
-                    }
+                    applySelection('aperture', aperture, event);
                     applyFiltersAndRedraw();
                 }
             });
             
             elem.addEventListener('mouseenter', () => {
-                if (!isActive && !isDisabled) {
+                if (!(aperture && normalizeToArray(activeFilters.aperture).includes(aperture)) && !isDisabled) {
                     elem.style.backgroundColor = 'rgba(59, 130, 246, 0.1)';
                 }
             });
             elem.addEventListener('mouseleave', () => {
-                if (!isActive && !isDisabled) {
+                if (!(aperture && normalizeToArray(activeFilters.aperture).includes(aperture)) && !isDisabled) {
                     elem.style.backgroundColor = 'transparent';
                 }
             });
@@ -3059,27 +3330,23 @@ function displayAnalysisResults(analysis, facets = null) {
         // Add click handlers for shutter speeds
         document.querySelectorAll('.clickable-shutter').forEach(elem => {
             const shutter = elem.getAttribute('data-shutter');
-            const isActive = activeFilters.shutter_speed === shutter;
+            const isActive = shutter ? normalizeToArray(activeFilters.shutter_speed).includes(shutter) : false;
             const isDisabled = elem.style.opacity === '0.3';
             
-            elem.addEventListener('click', () => {
+            elem.addEventListener('click', (event) => {
                 if (shutter && !isDisabled) {
-                    if (activeFilters.shutter_speed === shutter) {
-                        delete activeFilters.shutter_speed;
-                    } else {
-                        activeFilters.shutter_speed = shutter;
-                    }
+                    applySelection('shutter_speed', shutter, event);
                     applyFiltersAndRedraw();
                 }
             });
             
             elem.addEventListener('mouseenter', () => {
-                if (!isActive && !isDisabled) {
+                if (!(shutter && normalizeToArray(activeFilters.shutter_speed).includes(shutter)) && !isDisabled) {
                     elem.style.backgroundColor = 'rgba(59, 130, 246, 0.1)';
                 }
             });
             elem.addEventListener('mouseleave', () => {
-                if (!isActive && !isDisabled) {
+                if (!(shutter && normalizeToArray(activeFilters.shutter_speed).includes(shutter)) && !isDisabled) {
                     elem.style.backgroundColor = 'transparent';
                 }
             });
@@ -3088,27 +3355,23 @@ function displayAnalysisResults(analysis, facets = null) {
         // Add click handlers for ISO settings
         document.querySelectorAll('.clickable-iso').forEach(elem => {
             const iso = elem.getAttribute('data-iso');
-            const isActive = activeFilters.iso === iso;
+            const isActive = iso ? normalizeToArray(activeFilters.iso).includes(iso) : false;
             const isDisabled = elem.style.opacity === '0.3';
             
-            elem.addEventListener('click', () => {
+            elem.addEventListener('click', (event) => {
                 if (iso && !isDisabled) {
-                    if (activeFilters.iso === iso) {
-                        delete activeFilters.iso;
-                    } else {
-                        activeFilters.iso = iso;
-                    }
+                    applySelection('iso', iso, event);
                     applyFiltersAndRedraw();
                 }
             });
             
             elem.addEventListener('mouseenter', () => {
-                if (!isActive && !isDisabled) {
+                if (!(iso && normalizeToArray(activeFilters.iso).includes(iso)) && !isDisabled) {
                     elem.style.backgroundColor = 'rgba(59, 130, 246, 0.1)';
                 }
             });
             elem.addEventListener('mouseleave', () => {
-                if (!isActive && !isDisabled) {
+                if (!(iso && normalizeToArray(activeFilters.iso).includes(iso)) && !isDisabled) {
                     elem.style.backgroundColor = 'transparent';
                 }
             });
@@ -3117,27 +3380,23 @@ function displayAnalysisResults(analysis, facets = null) {
         // Add click handlers for focal lengths
         document.querySelectorAll('.clickable-focal').forEach(elem => {
             const focal = elem.getAttribute('data-focal');
-            const isActive = activeFilters.focal_length === focal;
+            const isActive = focal ? normalizeToArray(activeFilters.focal_length).includes(focal) : false;
             const isDisabled = elem.style.opacity === '0.3';
             
-            elem.addEventListener('click', () => {
+            elem.addEventListener('click', (event) => {
                 if (focal && !isDisabled) {
-                    if (activeFilters.focal_length === focal) {
-                        delete activeFilters.focal_length;
-                    } else {
-                        activeFilters.focal_length = focal;
-                    }
+                    applySelection('focal_length', focal, event);
                     applyFiltersAndRedraw();
                 }
             });
             
             elem.addEventListener('mouseenter', () => {
-                if (!isActive && !isDisabled) {
+                if (!(focal && normalizeToArray(activeFilters.focal_length).includes(focal)) && !isDisabled) {
                     elem.style.backgroundColor = 'rgba(59, 130, 246, 0.1)';
                 }
             });
             elem.addEventListener('mouseleave', () => {
-                if (!isActive && !isDisabled) {
+                if (!(focal && normalizeToArray(activeFilters.focal_length).includes(focal)) && !isDisabled) {
                     elem.style.backgroundColor = 'transparent';
                 }
             });

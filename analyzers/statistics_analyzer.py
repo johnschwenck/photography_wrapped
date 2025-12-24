@@ -377,36 +377,60 @@ class StatisticsAnalyzer:
         return analysis
 
     def _filter_photos(self, photos: List[Any], filters: dict) -> List[Any]:
+        def _values_as_set(value) -> set:
+            if value is None:
+                return set()
+            if isinstance(value, (list, tuple, set)):
+                return set(value)
+            return {value}
+
+        def _values_as_str_set(value) -> set:
+            return {str(v) for v in _values_as_set(value) if v is not None}
+
         filtered_photos = photos
 
         if 'camera' in filters:
-            filtered_photos = [p for p in filtered_photos if p.camera == filters['camera']]
+            cameras = _values_as_set(filters['camera'])
+            filtered_photos = [p for p in filtered_photos if p.camera in cameras]
 
         if 'lens' in filters:
-            filtered_photos = [p for p in filtered_photos if p.lens == filters['lens']]
+            lenses = _values_as_set(filters['lens'])
+            filtered_photos = [p for p in filtered_photos if p.lens in lenses]
 
         if 'aperture' in filters:
-            filter_aperture = str(filters['aperture'])
-            filtered_photos = [p for p in filtered_photos if p.aperture and str(p.aperture) == filter_aperture]
+            apertures = _values_as_str_set(filters['aperture'])
+            filtered_photos = [p for p in filtered_photos if p.aperture and str(p.aperture) in apertures]
 
         if 'shutter_speed' in filters:
-            filtered_photos = [p for p in filtered_photos if p.shutter_speed == filters['shutter_speed']]
+            speeds = _values_as_set(filters['shutter_speed'])
+            filtered_photos = [p for p in filtered_photos if p.shutter_speed in speeds]
 
         if 'iso' in filters:
-            filter_iso = str(filters['iso'])
-            filtered_photos = [p for p in filtered_photos if p.iso and str(p.iso) == filter_iso]
+            isos = _values_as_str_set(filters['iso'])
+            filtered_photos = [p for p in filtered_photos if p.iso and str(p.iso) in isos]
 
         if 'focal_length' in filters:
-            filter_focal = float(filters['focal_length'])
-            filtered_photos = [p for p in filtered_photos if p.focal_length and abs(float(p.focal_length) - filter_focal) < 0.1]
+            focal_values = []
+            for v in _values_as_set(filters['focal_length']):
+                try:
+                    focal_values.append(float(v))
+                except (TypeError, ValueError):
+                    continue
+            if focal_values:
+                filtered_photos = [
+                    p for p in filtered_photos
+                    if p.focal_length and any(abs(float(p.focal_length) - fv) < 0.1 for fv in focal_values)
+                ]
 
         if 'time_of_day' in filters:
-            filtered_photos = [p for p in filtered_photos if p.time_of_day == filters['time_of_day']]
+            times = _values_as_set(filters['time_of_day'])
+            filtered_photos = [p for p in filtered_photos if p.time_of_day in times]
 
         if 'lens_type' in filters:
-            if filters['lens_type'] == 'prime':
+            lens_type = filters['lens_type']
+            if lens_type == 'prime':
                 filtered_photos = [p for p in filtered_photos if p.lens and '-' not in p.lens]
-            elif filters['lens_type'] == 'zoom':
+            elif lens_type == 'zoom':
                 filtered_photos = [p for p in filtered_photos if p.lens and '-' in p.lens]
 
         return filtered_photos

@@ -718,21 +718,57 @@ def analyze_database():
             conn = db.conn
             all_sessions = conn.execute("SELECT * FROM sessions").fetchall()
             
+            def _safe_int(v):
+                try:
+                    return int(v)
+                except Exception:
+                    return 0
+
+            def _hit_rate_contrib(total_photos, total_raw_photos):
+                if total_raw_photos is None:
+                    return None
+                raw = _safe_int(total_raw_photos)
+                photos = _safe_int(total_photos)
+                if raw <= 0:
+                    return None
+                if photos < 0:
+                    return None
+                if photos > raw:
+                    return None
+                return photos, raw
+
             # Get category breakdown - always include all
             categories = {}
             for session in all_sessions:
                 cat = session['category'] or 'Uncategorized'
                 if cat not in categories:
-                    categories[cat] = {'sessions': 0, 'photos': 0, 'raw_photos': 0, 'hit_rate': None}
+                    categories[cat] = {
+                        'sessions': 0,
+                        'photos': 0,
+                        'raw_photos': 0,
+                        'hit_rate_photos': 0,
+                        'hit_rate': None,
+                        'missing_raw_sessions': 0,
+                        'invalid_raw_sessions': 0,
+                    }
                 categories[cat]['sessions'] += 1
-                categories[cat]['photos'] += session['total_photos']
-                if session['total_raw_photos'] is not None:
-                    categories[cat]['raw_photos'] += session['total_raw_photos']
-            
+                categories[cat]['photos'] += _safe_int(session['total_photos'])
+
+                contrib = _hit_rate_contrib(session['total_photos'], session['total_raw_photos'])
+                if contrib is None:
+                    if session['total_raw_photos'] is None:
+                        categories[cat]['missing_raw_sessions'] += 1
+                    else:
+                        categories[cat]['invalid_raw_sessions'] += 1
+                else:
+                    photos_c, raw_c = contrib
+                    categories[cat]['hit_rate_photos'] += photos_c
+                    categories[cat]['raw_photos'] += raw_c
+
             # Calculate hit rate for each category
             for cat in categories:
                 if categories[cat]['raw_photos'] > 0:
-                    categories[cat]['hit_rate'] = (categories[cat]['photos'] / categories[cat]['raw_photos']) * 100
+                    categories[cat]['hit_rate'] = (categories[cat]['hit_rate_photos'] / categories[cat]['raw_photos']) * 100
             
             # Get group breakdown - always include all with category mapping
             groups = {}
@@ -741,17 +777,35 @@ def analyze_database():
                 grp = session['group_name'] or 'Ungrouped'
                 cat = session['category'] or 'Uncategorized'
                 if grp not in groups:
-                    groups[grp] = {'sessions': 0, 'photos': 0, 'category': cat, 'raw_photos': 0, 'hit_rate': None}
+                    groups[grp] = {
+                        'sessions': 0,
+                        'photos': 0,
+                        'category': cat,
+                        'raw_photos': 0,
+                        'hit_rate_photos': 0,
+                        'hit_rate': None,
+                        'missing_raw_sessions': 0,
+                        'invalid_raw_sessions': 0,
+                    }
                     group_to_category[grp] = cat
                 groups[grp]['sessions'] += 1
-                groups[grp]['photos'] += session['total_photos']
-                if session['total_raw_photos'] is not None:
-                    groups[grp]['raw_photos'] += session['total_raw_photos']
-            
+                groups[grp]['photos'] += _safe_int(session['total_photos'])
+
+                contrib = _hit_rate_contrib(session['total_photos'], session['total_raw_photos'])
+                if contrib is None:
+                    if session['total_raw_photos'] is None:
+                        groups[grp]['missing_raw_sessions'] += 1
+                    else:
+                        groups[grp]['invalid_raw_sessions'] += 1
+                else:
+                    photos_c, raw_c = contrib
+                    groups[grp]['hit_rate_photos'] += photos_c
+                    groups[grp]['raw_photos'] += raw_c
+
             # Calculate hit rate for each group
             for grp in groups:
                 if groups[grp]['raw_photos'] > 0:
-                    groups[grp]['hit_rate'] = (groups[grp]['photos'] / groups[grp]['raw_photos']) * 100
+                    groups[grp]['hit_rate'] = (groups[grp]['hit_rate_photos'] / groups[grp]['raw_photos']) * 100
             
             # Always add categories and groups metadata so they stay visible
             analysis.metadata['categories'] = categories
@@ -825,21 +879,51 @@ def analyze_database():
             # Add categories and groups breakdown - always show ALL from database
             conn = db.conn
             all_sessions = conn.execute("SELECT * FROM sessions").fetchall()
+
+            def _safe_int(v):
+                try:
+                    return int(v)
+                except Exception:
+                    return 0
+
+            def _hit_rate_contrib(total_photos, total_raw_photos):
+                # Only count sessions with valid RAW totals; prevents >100% and missing-data inflation.
+                if total_raw_photos is None:
+                    return None
+                raw = _safe_int(total_raw_photos)
+                photos = _safe_int(total_photos)
+                if raw <= 0:
+                    return None
+                if photos < 0:
+                    return None
+                if photos > raw:
+                    return None
+                return photos, raw
             
             categories = {}
             for session in all_sessions:
                 cat = session['category'] or 'Uncategorized'
                 if cat not in categories:
-                    categories[cat] = {'sessions': 0, 'photos': 0, 'raw_photos': 0, 'hit_rate': None}
+                    categories[cat] = {
+                        'sessions': 0,
+                        'photos': 0,
+                        'raw_photos': 0,
+                        'hit_rate_photos': 0,
+                        'hit_rate': None,
+                    }
                 categories[cat]['sessions'] += 1
-                categories[cat]['photos'] += session['total_photos']
-                if session['total_raw_photos'] is not None:
-                    categories[cat]['raw_photos'] += session['total_raw_photos']
+                categories[cat]['photos'] += _safe_int(session['total_photos'])
+
+                contrib = _hit_rate_contrib(session['total_photos'], session['total_raw_photos'])
+                if contrib is not None:
+                    photos_c, raw_c = contrib
+                    categories[cat]['hit_rate_photos'] += photos_c
+                    categories[cat]['raw_photos'] += raw_c
             
             # Calculate hit rate for each category
             for cat in categories:
                 if categories[cat]['raw_photos'] > 0:
-                    categories[cat]['hit_rate'] = (categories[cat]['photos'] / categories[cat]['raw_photos']) * 100
+                    categories[cat]['hit_rate'] = (categories[cat]['hit_rate_photos'] / categories[cat]['raw_photos']) * 100
             
             groups = {}
             group_to_category = {}
@@ -847,17 +931,28 @@ def analyze_database():
                 grp = session['group_name'] or 'Ungrouped'
                 cat = session['category'] or 'Uncategorized'
                 if grp not in groups:
-                    groups[grp] = {'sessions': 0, 'photos': 0, 'category': cat, 'raw_photos': 0, 'hit_rate': None}
+                    groups[grp] = {
+                        'sessions': 0,
+                        'photos': 0,
+                        'category': cat,
+                        'raw_photos': 0,
+                        'hit_rate_photos': 0,
+                        'hit_rate': None,
+                    }
                     group_to_category[grp] = cat
                 groups[grp]['sessions'] += 1
-                groups[grp]['photos'] += session['total_photos']
-                if session['total_raw_photos'] is not None:
-                    groups[grp]['raw_photos'] += session['total_raw_photos']
+                groups[grp]['photos'] += _safe_int(session['total_photos'])
+
+                contrib = _hit_rate_contrib(session['total_photos'], session['total_raw_photos'])
+                if contrib is not None:
+                    photos_c, raw_c = contrib
+                    groups[grp]['hit_rate_photos'] += photos_c
+                    groups[grp]['raw_photos'] += raw_c
             
             # Calculate hit rate for each group
             for grp in groups:
                 if groups[grp]['raw_photos'] > 0:
-                    groups[grp]['hit_rate'] = (groups[grp]['photos'] / groups[grp]['raw_photos']) * 100
+                    groups[grp]['hit_rate'] = (groups[grp]['hit_rate_photos'] / groups[grp]['raw_photos']) * 100
             
             analysis.metadata['categories'] = categories
             analysis.metadata['groups'] = groups
@@ -870,21 +965,51 @@ def analyze_database():
             # Add categories and groups breakdown - always show ALL from database
             conn = db.conn
             all_sessions = conn.execute("SELECT * FROM sessions").fetchall()
+
+            def _safe_int(v):
+                try:
+                    return int(v)
+                except Exception:
+                    return 0
+
+            def _hit_rate_contrib(total_photos, total_raw_photos):
+                # Only count sessions with valid RAW totals; prevents >100% and missing-data inflation.
+                if total_raw_photos is None:
+                    return None
+                raw = _safe_int(total_raw_photos)
+                photos = _safe_int(total_photos)
+                if raw <= 0:
+                    return None
+                if photos < 0:
+                    return None
+                if photos > raw:
+                    return None
+                return photos, raw
             
             categories = {}
             for session in all_sessions:
                 cat = session['category'] or 'Uncategorized'
                 if cat not in categories:
-                    categories[cat] = {'sessions': 0, 'photos': 0, 'raw_photos': 0, 'hit_rate': None}
+                    categories[cat] = {
+                        'sessions': 0,
+                        'photos': 0,
+                        'raw_photos': 0,
+                        'hit_rate_photos': 0,
+                        'hit_rate': None,
+                    }
                 categories[cat]['sessions'] += 1
-                categories[cat]['photos'] += session['total_photos']
-                if session['total_raw_photos'] is not None:
-                    categories[cat]['raw_photos'] += session['total_raw_photos']
+                categories[cat]['photos'] += _safe_int(session['total_photos'])
+
+                contrib = _hit_rate_contrib(session['total_photos'], session['total_raw_photos'])
+                if contrib is not None:
+                    photos_c, raw_c = contrib
+                    categories[cat]['hit_rate_photos'] += photos_c
+                    categories[cat]['raw_photos'] += raw_c
             
             # Calculate hit rate for each category
             for cat in categories:
                 if categories[cat]['raw_photos'] > 0:
-                    categories[cat]['hit_rate'] = (categories[cat]['photos'] / categories[cat]['raw_photos']) * 100
+                    categories[cat]['hit_rate'] = (categories[cat]['hit_rate_photos'] / categories[cat]['raw_photos']) * 100
             
             groups = {}
             group_to_category = {}
@@ -892,17 +1017,28 @@ def analyze_database():
                 grp = session['group_name'] or 'Ungrouped'
                 cat = session['category'] or 'Uncategorized'
                 if grp not in groups:
-                    groups[grp] = {'sessions': 0, 'photos': 0, 'category': cat, 'raw_photos': 0, 'hit_rate': None}
+                    groups[grp] = {
+                        'sessions': 0,
+                        'photos': 0,
+                        'category': cat,
+                        'raw_photos': 0,
+                        'hit_rate_photos': 0,
+                        'hit_rate': None,
+                    }
                     group_to_category[grp] = cat
                 groups[grp]['sessions'] += 1
-                groups[grp]['photos'] += session['total_photos']
-                if session['total_raw_photos'] is not None:
-                    groups[grp]['raw_photos'] += session['total_raw_photos']
+                groups[grp]['photos'] += _safe_int(session['total_photos'])
+
+                contrib = _hit_rate_contrib(session['total_photos'], session['total_raw_photos'])
+                if contrib is not None:
+                    photos_c, raw_c = contrib
+                    groups[grp]['hit_rate_photos'] += photos_c
+                    groups[grp]['raw_photos'] += raw_c
             
             # Calculate hit rate for each group
             for grp in groups:
                 if groups[grp]['raw_photos'] > 0:
-                    groups[grp]['hit_rate'] = (groups[grp]['photos'] / groups[grp]['raw_photos']) * 100
+                    groups[grp]['hit_rate'] = (groups[grp]['hit_rate_photos'] / groups[grp]['raw_photos']) * 100
             
             analysis.metadata['categories'] = categories
             analysis.metadata['groups'] = groups
@@ -914,22 +1050,52 @@ def analyze_database():
             # Add categories and groups breakdown for "All Data" view
             conn = db.conn
             all_sessions = conn.execute("SELECT * FROM sessions").fetchall()
+
+            def _safe_int(v):
+                try:
+                    return int(v)
+                except Exception:
+                    return 0
+
+            def _hit_rate_contrib(total_photos, total_raw_photos):
+                # Only count sessions with valid RAW totals; prevents >100% and missing-data inflation.
+                if total_raw_photos is None:
+                    return None
+                raw = _safe_int(total_raw_photos)
+                photos = _safe_int(total_photos)
+                if raw <= 0:
+                    return None
+                if photos < 0:
+                    return None
+                if photos > raw:
+                    return None
+                return photos, raw
             
             # Get category breakdown
             categories = {}
             for session in all_sessions:
                 cat = session['category'] or 'Uncategorized'
                 if cat not in categories:
-                    categories[cat] = {'sessions': 0, 'photos': 0, 'raw_photos': 0, 'hit_rate': None}
+                    categories[cat] = {
+                        'sessions': 0,
+                        'photos': 0,
+                        'raw_photos': 0,
+                        'hit_rate_photos': 0,
+                        'hit_rate': None,
+                    }
                 categories[cat]['sessions'] += 1
-                categories[cat]['photos'] += session['total_photos']
-                if session['total_raw_photos'] is not None:
-                    categories[cat]['raw_photos'] += session['total_raw_photos']
+                categories[cat]['photos'] += _safe_int(session['total_photos'])
+
+                contrib = _hit_rate_contrib(session['total_photos'], session['total_raw_photos'])
+                if contrib is not None:
+                    photos_c, raw_c = contrib
+                    categories[cat]['hit_rate_photos'] += photos_c
+                    categories[cat]['raw_photos'] += raw_c
             
             # Calculate hit rate for each category
             for cat in categories:
                 if categories[cat]['raw_photos'] > 0:
-                    categories[cat]['hit_rate'] = (categories[cat]['photos'] / categories[cat]['raw_photos']) * 100
+                    categories[cat]['hit_rate'] = (categories[cat]['hit_rate_photos'] / categories[cat]['raw_photos']) * 100
             
             # Get group breakdown with category mapping
             groups = {}
@@ -938,17 +1104,28 @@ def analyze_database():
                 grp = session['group_name'] or 'Ungrouped'
                 cat = session['category'] or 'Uncategorized'
                 if grp not in groups:
-                    groups[grp] = {'sessions': 0, 'photos': 0, 'category': cat, 'raw_photos': 0, 'hit_rate': None}
+                    groups[grp] = {
+                        'sessions': 0,
+                        'photos': 0,
+                        'category': cat,
+                        'raw_photos': 0,
+                        'hit_rate_photos': 0,
+                        'hit_rate': None,
+                    }
                     group_to_category[grp] = cat
                 groups[grp]['sessions'] += 1
-                groups[grp]['photos'] += session['total_photos']
-                if session['total_raw_photos'] is not None:
-                    groups[grp]['raw_photos'] += session['total_raw_photos']
+                groups[grp]['photos'] += _safe_int(session['total_photos'])
+
+                contrib = _hit_rate_contrib(session['total_photos'], session['total_raw_photos'])
+                if contrib is not None:
+                    photos_c, raw_c = contrib
+                    groups[grp]['hit_rate_photos'] += photos_c
+                    groups[grp]['raw_photos'] += raw_c
             
             # Calculate hit rate for each group
             for grp in groups:
                 if groups[grp]['raw_photos'] > 0:
-                    groups[grp]['hit_rate'] = (groups[grp]['photos'] / groups[grp]['raw_photos']) * 100
+                    groups[grp]['hit_rate'] = (groups[grp]['hit_rate_photos'] / groups[grp]['raw_photos']) * 100
             
             analysis.metadata['categories'] = categories
             analysis.metadata['groups'] = groups
@@ -976,6 +1153,13 @@ def analyze_database():
 def analyze_database_faceted():
     """Analyze database and return faceted counts in a single response."""
 
+    def _as_list(value):
+        if value is None:
+            return []
+        if isinstance(value, list):
+            return value
+        return [value]
+
     def _resolve_session_ids(conn, category, group, sessions, filters):
         # Check if category/group come from filters dict (for drill-down filtering)
         if filters and 'category' in filters:
@@ -991,46 +1175,89 @@ def analyze_database_faceted():
                 sessions
             ).fetchall()
             session_ids = [s['id'] for s in session_rows]
-        elif category and group:
-            session_rows = conn.execute(
-                "SELECT id FROM sessions WHERE category = ? AND group_name = ?",
-                (category, group)
-            ).fetchall()
-            session_ids = [s['id'] for s in session_rows]
-        elif category:
-            session_rows = conn.execute(
-                "SELECT id FROM sessions WHERE category = ?",
-                (category,)
-            ).fetchall()
-            session_ids = [s['id'] for s in session_rows]
-        elif group:
-            session_rows = conn.execute(
-                "SELECT id FROM sessions WHERE group_name = ?",
-                (group,)
-            ).fetchall()
-            session_ids = [s['id'] for s in session_rows]
         else:
-            session_rows = conn.execute("SELECT id FROM sessions").fetchall()
-            session_ids = [s['id'] for s in session_rows]
+            category_list = _as_list(category)
+            group_list = _as_list(group)
+
+            where_clauses = []
+            params = []
+
+            if category_list:
+                placeholders = ','.join('?' * len(category_list))
+                where_clauses.append(f"category IN ({placeholders})")
+                params.extend(category_list)
+
+            if group_list:
+                placeholders = ','.join('?' * len(group_list))
+                where_clauses.append(f"group_name IN ({placeholders})")
+                params.extend(group_list)
+
+            if where_clauses:
+                where_sql = " AND ".join(where_clauses)
+                session_rows = conn.execute(
+                    f"SELECT id FROM sessions WHERE {where_sql}",
+                    tuple(params)
+                ).fetchall()
+                session_ids = [s['id'] for s in session_rows]
+            else:
+                session_rows = conn.execute("SELECT id FROM sessions").fetchall()
+                session_ids = [s['id'] for s in session_rows]
 
         return category, group, session_ids
 
     def _build_baseline_category_group_metadata(conn):
         all_sessions = conn.execute("SELECT * FROM sessions").fetchall()
 
+        def _safe_int(v):
+            try:
+                return int(v)
+            except Exception:
+                return 0
+
+        def _hit_rate_contrib(total_photos, total_raw_photos):
+            # Only count sessions with valid RAW totals; prevents >100% and missing-data inflation.
+            if total_raw_photos is None:
+                return None
+            raw = _safe_int(total_raw_photos)
+            photos = _safe_int(total_photos)
+            if raw <= 0:
+                return None
+            if photos < 0:
+                return None
+            if photos > raw:
+                return None
+            return photos, raw
+
         categories = {}
         for session in all_sessions:
             cat = session['category'] or 'Uncategorized'
             if cat not in categories:
-                categories[cat] = {'sessions': 0, 'photos': 0, 'raw_photos': 0, 'hit_rate': None}
+                categories[cat] = {
+                    'sessions': 0,
+                    'photos': 0,
+                    'raw_photos': 0,
+                    'hit_rate_photos': 0,
+                    'hit_rate': None,
+                    'missing_raw_sessions': 0,
+                    'invalid_raw_sessions': 0,
+                }
             categories[cat]['sessions'] += 1
-            categories[cat]['photos'] += session['total_photos']
-            if session['total_raw_photos'] is not None:
-                categories[cat]['raw_photos'] += session['total_raw_photos']
+            categories[cat]['photos'] += _safe_int(session['total_photos'])
+
+            contrib = _hit_rate_contrib(session['total_photos'], session['total_raw_photos'])
+            if contrib is None:
+                if session['total_raw_photos'] is None:
+                    categories[cat]['missing_raw_sessions'] += 1
+                else:
+                    categories[cat]['invalid_raw_sessions'] += 1
+            else:
+                photos_c, raw_c = contrib
+                categories[cat]['hit_rate_photos'] += photos_c
+                categories[cat]['raw_photos'] += raw_c
 
         for cat in categories:
             if categories[cat]['raw_photos'] > 0:
-                categories[cat]['hit_rate'] = (categories[cat]['photos'] / categories[cat]['raw_photos']) * 100
+                categories[cat]['hit_rate'] = (categories[cat]['hit_rate_photos'] / categories[cat]['raw_photos']) * 100
 
         groups = {}
         group_to_category = {}
@@ -1038,16 +1265,34 @@ def analyze_database_faceted():
             grp = session['group_name'] or 'Ungrouped'
             cat = session['category'] or 'Uncategorized'
             if grp not in groups:
-                groups[grp] = {'sessions': 0, 'photos': 0, 'category': cat, 'raw_photos': 0, 'hit_rate': None}
+                groups[grp] = {
+                    'sessions': 0,
+                    'photos': 0,
+                    'category': cat,
+                    'raw_photos': 0,
+                    'hit_rate_photos': 0,
+                    'hit_rate': None,
+                    'missing_raw_sessions': 0,
+                    'invalid_raw_sessions': 0,
+                }
                 group_to_category[grp] = cat
             groups[grp]['sessions'] += 1
-            groups[grp]['photos'] += session['total_photos']
-            if session['total_raw_photos'] is not None:
-                groups[grp]['raw_photos'] += session['total_raw_photos']
+            groups[grp]['photos'] += _safe_int(session['total_photos'])
+
+            contrib = _hit_rate_contrib(session['total_photos'], session['total_raw_photos'])
+            if contrib is None:
+                if session['total_raw_photos'] is None:
+                    groups[grp]['missing_raw_sessions'] += 1
+                else:
+                    groups[grp]['invalid_raw_sessions'] += 1
+            else:
+                photos_c, raw_c = contrib
+                groups[grp]['hit_rate_photos'] += photos_c
+                groups[grp]['raw_photos'] += raw_c
 
         for grp in groups:
             if groups[grp]['raw_photos'] > 0:
-                groups[grp]['hit_rate'] = (groups[grp]['photos'] / groups[grp]['raw_photos']) * 100
+                groups[grp]['hit_rate'] = (groups[grp]['hit_rate_photos'] / groups[grp]['raw_photos']) * 100
 
         return categories, groups, group_to_category
 
