@@ -1,6 +1,9 @@
 // API base URL
 const API_BASE = 'http://localhost:5000/api';
 
+// Version check - if you see this in console, cache is cleared
+console.log('app.js version: 20251225a - Advanced Analytics included');
+
 // Utility function to escape HTML
 function escapeHtml(text) {
     if (text === null || text === undefined) return '';
@@ -2510,6 +2513,8 @@ function displayAnalysisResults(analysis, facets = null) {
     console.log('analysis.camera_freq:', analysis.camera_freq);
     console.log('Has filters?', Object.keys(activeFilters).length > 0);
 
+    console.log('About to define formatSelectionLabel');
+    
     const formatSelectionLabel = (value, pluralLabel) => {
         const values = normalizeToArray(value);
         if (values.length === 0) return null;
@@ -2517,10 +2522,13 @@ function displayAnalysisResults(analysis, facets = null) {
         return `Multiple ${pluralLabel}`;
     };
 
+    console.log('formatSelectionLabel defined, determining title');
+    
     // Determine the title based on query parameters
     let mainTitle = 'Analysis Complete';
     const categoryLabel = formatSelectionLabel(analysis.query_category, 'Categories');
     const groupLabel = formatSelectionLabel(analysis.query_group, 'Groups');
+    console.log('Labels computed:', { categoryLabel, groupLabel });
     if (categoryLabel && !groupLabel) {
         mainTitle = `${categoryLabel} - All Groups`;
     } else if (groupLabel && !categoryLabel) {
@@ -2572,6 +2580,28 @@ function displayAnalysisResults(analysis, facets = null) {
                 </div>
                 ` : ''}
             </div>
+        </div>
+    `;
+    
+    // Add Advanced Analytics section
+    console.log('Adding Advanced Analytics section to HTML');
+    html += `
+        <div class="result-card" style="margin-bottom: 20px; border: 3px solid lime;">
+            <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+                <h3 style="margin: 0;">Advanced Analytics</h3>
+                <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+                    <button id="btn-load-trends" onclick="loadTrendsAnalysis()" style="padding: 10px 20px; background: rgba(34, 197, 94, 0.8); color: white; border: none; border-radius: 5px; cursor: pointer; font-size: 0.9em; font-weight: bold;">
+                        Trends Over Time
+                    </button>
+                    <button id="btn-load-correlations" onclick="loadCorrelationsAnalysis()" style="padding: 10px 20px; background: rgba(59, 130, 246, 0.8); color: white; border: none; border-radius: 5px; cursor: pointer; font-size: 0.9em; font-weight: bold;">
+                        Hit Rate Correlations
+                    </button>
+                </div>
+            </div>
+            <p style="color: var(--text-secondary); margin: 10px 0 0 0; font-size: 0.9em;">
+                Analyze how your photography has evolved over time and discover which settings give you the best results.
+            </p>
+            <div id="advanced-analytics-container" style="margin-top: 15px;"></div>
         </div>
     `;
     
@@ -4171,4 +4201,622 @@ async function deleteSession(sessionId, sessionName) {
     } catch (error) {
         alert(`Error deleting session: ${error.message}`);
     }
+}
+
+// ============================================================================
+// ADVANCED ANALYTICS: Trends & Correlations
+// ============================================================================
+
+// Track which analytics panel is currently open
+let currentAnalyticsPanel = null; // 'trends' | 'correlations' | null
+
+function closeAnalyticsPanel() {
+    const container = document.getElementById('advanced-analytics-container');
+    const trendsBtn = document.getElementById('btn-load-trends');
+    const corrBtn = document.getElementById('btn-load-correlations');
+    
+    if (container) container.innerHTML = '';
+    if (trendsBtn) trendsBtn.style.background = 'rgba(34, 197, 94, 0.8)';
+    if (corrBtn) corrBtn.style.background = 'rgba(59, 130, 246, 0.8)';
+    currentAnalyticsPanel = null;
+}
+
+// Slicer change handlers for correlations
+window.onCorrelationsYearChange = function(year) {
+    correlationsSelectedYear = year || null;
+    correlationsSelectedMonth = null; // Reset month when year changes
+    loadCorrelationsAnalysis(year, ''); // Pass empty string to trigger reload
+};
+
+window.onCorrelationsMonthChange = function(month) {
+    correlationsSelectedMonth = month || null;
+    loadCorrelationsAnalysis(correlationsSelectedYear, month);
+};
+
+window.loadTrendsAnalysis = async function() {
+    const container = document.getElementById('advanced-analytics-container');
+    const btn = document.getElementById('btn-load-trends');
+    const otherBtn = document.getElementById('btn-load-correlations');
+    
+    if (!container || !btn) return;
+    
+    // Toggle: if trends is already open, close it
+    if (currentAnalyticsPanel === 'trends') {
+        closeAnalyticsPanel();
+        return;
+    }
+    
+    // Reset other button style
+    if (otherBtn) otherBtn.style.background = 'rgba(59, 130, 246, 0.8)';
+    
+    btn.disabled = true;
+    btn.textContent = 'Loading...';
+    container.innerHTML = '<div class="loading">Analyzing trends...</div>';
+    
+    try {
+        const response = await fetch(`${API_BASE}/analyze/trends`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ filters: activeFilters })
+        });
+        
+        const data = await response.json();
+        
+        if (!response.ok || !data.success) {
+            container.innerHTML = `<p style="color: var(--error);">Error: ${data.error || 'Failed to load trends'}</p>`;
+            return;
+        }
+        
+        if (data.trends.message) {
+            container.innerHTML = `<p style="color: var(--text-secondary);">${data.trends.message}</p>`;
+            return;
+        }
+        
+        displayTrendsResults(data.trends);
+        
+    } catch (error) {
+        container.innerHTML = `<p style="color: var(--error);">Error: ${error.message}</p>`;
+        currentAnalyticsPanel = null;
+    } finally {
+        btn.disabled = false;
+        btn.textContent = 'Trends Over Time';
+        if (currentAnalyticsPanel === 'trends') {
+            btn.style.background = 'rgba(34, 197, 94, 1)'; // Highlight active button
+        }
+    }
+}
+
+function displayTrendsResults(trends) {
+    currentAnalyticsPanel = 'trends';
+    const container = document.getElementById('advanced-analytics-container');
+    
+    let html = `
+        <div style="border-top: 1px solid var(--border-color); padding-top: 15px;">
+            <h4 style="margin-bottom: 15px;">Trend Analysis (${trends.date_range.start} to ${trends.date_range.end})</h4>
+            
+            <!-- Hit Rate Trend -->
+            <div style="margin-bottom: 25px;">
+                <h5>Hit Rate Over Time</h5>
+                <div style="height: 300px;">
+                    <canvas id="chart-trend-hitrate"></canvas>
+                </div>
+            </div>
+            
+            <!-- Volume Trend -->
+            <div style="margin-bottom: 25px;">
+                <h5>Shooting Volume Over Time</h5>
+                <div style="height: 300px;">
+                    <canvas id="chart-trend-volume"></canvas>
+                </div>
+            </div>
+            
+            <!-- Lens Usage Over Time -->
+            <div style="margin-bottom: 25px;">
+                <h5>Top Lens Usage by Month</h5>
+                <div style="max-height: 300px; overflow-y: auto;">
+                    <table style="width: 100%; border-collapse: collapse; font-size: 0.9em;">
+                        <thead style="position: sticky; top: 0; background: var(--surface);">
+                            <tr style="border-bottom: 1px solid var(--border-color);">
+                                <th style="padding: 8px; text-align: left;">Month</th>
+                                <th style="padding: 8px; text-align: left;">Top Lenses</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+    `;
+    
+    trends.lens_usage.forEach((item, index) => {
+        const topLenses = Object.entries(item.lenses)
+            .sort((a, b) => b[1] - a[1]) // Sort by count descending (most final edits first)
+            .slice(0, 3)
+            .map(([lens, count]) => `${lens} (${count})`)
+            .join(', ');
+        const rowStyle = index % 2 === 0 ? 'background: rgba(255, 255, 255, 0.02);' : '';
+        html += `<tr style="${rowStyle}"><td style="padding: 8px;">${item.month}</td><td style="padding: 8px;">${topLenses || 'N/A'}</td></tr>`;
+    });
+    
+    html += `
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    container.innerHTML = html;
+    
+    // Render charts
+    setTimeout(() => {
+        // Hit Rate Trend Chart
+        const hitRateData = trends.hit_rate.filter(h => h.hit_rate !== null);
+        if (hitRateData.length > 0) {
+            const ctx = document.getElementById('chart-trend-hitrate');
+            if (ctx) {
+                new Chart(ctx.getContext('2d'), {
+                    type: 'line',
+                    data: {
+                        labels: hitRateData.map(h => h.month),
+                        datasets: [
+                            {
+                                label: 'Hit Rate (%)',
+                                data: hitRateData.map(h => h.hit_rate),
+                                borderColor: 'rgba(34, 197, 94, 1)',
+                                backgroundColor: 'rgba(34, 197, 94, 0.1)',
+                                fill: true,
+                                tension: 0.3
+                            },
+                            {
+                                label: '3-Month Moving Avg',
+                                data: trends.hit_rate_moving_avg.map(h => h.moving_avg),
+                                borderColor: 'rgba(251, 146, 60, 1)',
+                                borderDash: [5, 5],
+                                fill: false,
+                                tension: 0.3
+                            }
+                        ]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: { labels: { color: '#9ca3af' } },
+                            title: { display: false }
+                        },
+                        scales: {
+                            y: {
+                                beginAtZero: true,
+                                max: 100,
+                                title: { display: true, text: 'Hit Rate (%)', color: '#9ca3af' },
+                                grid: { color: 'rgba(75, 85, 99, 0.2)' },
+                                ticks: { color: '#9ca3af' }
+                            },
+                            x: {
+                                grid: { display: false },
+                                ticks: { color: '#9ca3af', maxRotation: 45 }
+                            }
+                        }
+                    }
+                });
+            }
+        }
+        
+        // Volume Trend Chart
+        if (trends.volume.length > 0) {
+            const ctx = document.getElementById('chart-trend-volume');
+            if (ctx) {
+                new Chart(ctx.getContext('2d'), {
+                    type: 'bar',
+                    data: {
+                        labels: trends.volume.map(v => v.month),
+                        datasets: [
+                            {
+                                label: 'Final Edits',
+                                data: trends.volume.map(v => v.photos),
+                                backgroundColor: 'rgba(59, 130, 246, 0.8)',
+                                borderColor: 'rgba(59, 130, 246, 1)',
+                                borderWidth: 1
+                            },
+                            {
+                                label: 'RAW Photos',
+                                data: trends.volume.map(v => v.raw_photos),
+                                backgroundColor: 'rgba(147, 51, 234, 0.4)',
+                                borderColor: 'rgba(147, 51, 234, 1)',
+                                borderWidth: 1
+                            }
+                        ]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: { labels: { color: '#9ca3af' } }
+                        },
+                        scales: {
+                            y: {
+                                beginAtZero: true,
+                                title: { display: true, text: 'Photo Count', color: '#9ca3af' },
+                                grid: { color: 'rgba(75, 85, 99, 0.2)' },
+                                ticks: { color: '#9ca3af' }
+                            },
+                            x: {
+                                grid: { display: false },
+                                ticks: { color: '#9ca3af', maxRotation: 45 }
+                            }
+                        }
+                    }
+                });
+            }
+        }
+    }, 100);
+}
+
+// Track selected year/month for correlations slicer
+let correlationsSelectedYear = null;
+let correlationsSelectedMonth = null;
+
+window.loadCorrelationsAnalysis = async function(year = null, month = null) {
+    const container = document.getElementById('advanced-analytics-container');
+    const btn = document.getElementById('btn-load-correlations');
+    const otherBtn = document.getElementById('btn-load-trends');
+    
+    if (!container || !btn) return;
+    
+    // Toggle: if correlations is already open AND no year/month change, close it
+    if (currentAnalyticsPanel === 'correlations' && year === null && month === null) {
+        closeAnalyticsPanel();
+        correlationsSelectedYear = null;
+        correlationsSelectedMonth = null;
+        return;
+    }
+    
+    // Update selected year/month if provided
+    if (year !== null) correlationsSelectedYear = year || null;
+    if (month !== null) correlationsSelectedMonth = month || null;
+    
+    // Reset other button style
+    if (otherBtn) otherBtn.style.background = 'rgba(34, 197, 94, 0.8)';
+    
+    btn.disabled = true;
+    btn.textContent = 'Loading...';
+    container.innerHTML = '<div class="loading">Analyzing correlations...</div>';
+    
+    try {
+        const response = await fetch(`${API_BASE}/analyze/correlations`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ 
+                filters: activeFilters,
+                year: correlationsSelectedYear,
+                month: correlationsSelectedMonth
+            })
+        });
+        
+        const data = await response.json();
+        
+        if (!response.ok || !data.success) {
+            container.innerHTML = `<p style="color: var(--error);">Error: ${data.error || 'Failed to load correlations'}</p>`;
+            return;
+        }
+        
+        if (data.correlations.message) {
+            // Still show slicers even with no data
+            displayCorrelationsResults(data.correlations, data.available_years, data.available_months);
+            return;
+        }
+        
+        displayCorrelationsResults(data.correlations, data.available_years, data.available_months);
+        
+    } catch (error) {
+        container.innerHTML = `<p style="color: var(--error);">Error: ${error.message}</p>`;
+        currentAnalyticsPanel = null;
+    } finally {
+        btn.disabled = false;
+        btn.textContent = 'Hit Rate Correlations';
+        if (currentAnalyticsPanel === 'correlations') {
+            btn.style.background = 'rgba(59, 130, 246, 1)'; // Highlight active button
+        }
+    }
+}
+
+function displayCorrelationsResults(correlations, availableYears = [], availableMonths = []) {
+    currentAnalyticsPanel = 'correlations';
+    const container = document.getElementById('advanced-analytics-container');
+    
+    // Month names for display
+    const monthNames = ['', 'January', 'February', 'March', 'April', 'May', 'June', 
+                        'July', 'August', 'September', 'October', 'November', 'December'];
+    
+    let html = `
+        <div style="border-top: 1px solid var(--border-color); padding-top: 15px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; margin-bottom: 15px;">
+                <h4 style="margin: 0;">Correlation Analysis (${correlations.total_sessions_analyzed || 0} sessions analyzed)</h4>
+                <div style="display: flex; gap: 10px; align-items: center;">
+                    <label style="font-size: 0.9em; color: var(--text-secondary);">Filter:</label>
+                    <select id="corr-year-select" onchange="onCorrelationsYearChange(this.value)" 
+                            style="padding: 5px 10px; border-radius: 5px; background: var(--surface); color: var(--text-primary); border: 1px solid var(--border-color);">
+                        <option value="">All Years</option>
+                        ${availableYears.map(y => `<option value="${y}" ${correlationsSelectedYear === y ? 'selected' : ''}>${y}</option>`).join('')}
+                    </select>
+                    <select id="corr-month-select" onchange="onCorrelationsMonthChange(this.value)" 
+                            style="padding: 5px 10px; border-radius: 5px; background: var(--surface); color: var(--text-secondary); border: 1px solid var(--border-color); ${!correlationsSelectedYear ? 'opacity: 0.5;' : ''}"
+                            ${!correlationsSelectedYear ? 'disabled' : ''}>
+                        <option value="">All Months</option>
+                        ${availableMonths.map(m => `<option value="${m}" ${correlationsSelectedMonth === m ? 'selected' : ''}>${monthNames[parseInt(m)]}</option>`).join('')}
+                    </select>
+                </div>
+            </div>
+    `;
+    
+    // Show message if no data
+    if (correlations.message) {
+        html += `<p style="color: var(--text-secondary);">${correlations.message}</p></div>`;
+        container.innerHTML = html;
+        return;
+    }
+    
+    // Insights
+    if (correlations.insights && correlations.insights.length > 0) {
+        html += `
+            <div style="background: rgba(34, 197, 94, 0.1); border-left: 3px solid rgba(34, 197, 94, 0.8); padding: 15px; margin-bottom: 20px; border-radius: 0 8px 8px 0;">
+                <h5 style="margin: 0 0 10px 0; color: rgba(34, 197, 94, 1);">Key Insights</h5>
+                <ul style="margin: 0; padding-left: 20px;">
+                    ${correlations.insights.map(insight => `<li style="margin: 5px 0;">${insight}</li>`).join('')}
+                </ul>
+            </div>
+        `;
+    }
+    
+    // Hit Rate by Lens Chart
+    if (correlations.by_lens && correlations.by_lens.length > 0) {
+        html += `
+            <div style="margin-bottom: 25px;">
+                <h5>Hit Rate by Lens</h5>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; align-items: start;">
+                    <div style="max-height: 300px; overflow-y: auto;">
+                        ${correlations.by_lens.map((item, i) => `
+                            <p style="margin: 5px 0; ${i === 0 ? 'color: rgba(34, 197, 94, 1); font-weight: bold;' : ''}">
+                                <strong>${item.name}:</strong> ${item.avg_hit_rate}% avg (+/-${item.std_dev}%, ${item.session_count} sessions)
+                            </p>
+                        `).join('')}
+                    </div>
+                    <div style="height: 300px;">
+                        <canvas id="chart-corr-lens"></canvas>
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+    
+    // Hit Rate by Time of Day
+    if (correlations.by_time_of_day && correlations.by_time_of_day.length > 0) {
+        html += `
+            <div style="margin-bottom: 25px;">
+                <h5>Hit Rate by Time of Day</h5>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; align-items: start;">
+                    <div>
+                        ${correlations.by_time_of_day.map((item, i) => `
+                            <p style="margin: 5px 0; ${i === 0 ? 'color: rgba(34, 197, 94, 1); font-weight: bold;' : ''}">
+                                <strong>${item.name}:</strong> ${item.avg_hit_rate}% avg (${item.session_count} sessions)
+                            </p>
+                        `).join('')}
+                    </div>
+                    <div style="height: 250px;">
+                        <canvas id="chart-corr-time"></canvas>
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+    
+    // Hit Rate by ISO
+    if (correlations.by_iso && correlations.by_iso.length > 0) {
+        html += `
+            <div style="margin-bottom: 25px;">
+                <h5>Hit Rate by ISO Range</h5>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; align-items: start;">
+                    <div>
+                        ${correlations.by_iso.map((item, i) => `
+                            <p style="margin: 5px 0; ${i === 0 ? 'color: rgba(34, 197, 94, 1); font-weight: bold;' : ''}">
+                                <strong>${item.name}:</strong> ${item.avg_hit_rate}% avg (${item.session_count} sessions)
+                            </p>
+                        `).join('')}
+                    </div>
+                    <div style="height: 250px;">
+                        <canvas id="chart-corr-iso"></canvas>
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+    
+    // Hit Rate by Day of Week
+    if (correlations.by_day_of_week && correlations.by_day_of_week.length > 0) {
+        html += `
+            <div style="margin-bottom: 25px;">
+                <h5>Hit Rate by Day of Week</h5>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; align-items: start;">
+                    <div>
+                        ${correlations.by_day_of_week.map((item, i) => `
+                            <p style="margin: 5px 0; ${i === 0 ? 'color: rgba(34, 197, 94, 1); font-weight: bold;' : ''}">
+                                <strong>${item.name}:</strong> ${item.avg_hit_rate}% avg (${item.session_count} sessions)
+                            </p>
+                        `).join('')}
+                    </div>
+                    <div style="height: 250px;">
+                        <canvas id="chart-corr-day"></canvas>
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+    
+    html += '</div>';
+    container.innerHTML = html;
+    
+    // Render charts
+    setTimeout(() => {
+        // Lens chart (horizontal bar)
+        if (correlations.by_lens && correlations.by_lens.length > 0) {
+            const ctx = document.getElementById('chart-corr-lens');
+            if (ctx) {
+                const sortedLenses = [...correlations.by_lens].slice(0, 10);
+                new Chart(ctx.getContext('2d'), {
+                    type: 'bar',
+                    data: {
+                        labels: sortedLenses.map(l => l.name.length > 20 ? l.name.substring(0, 20) + '...' : l.name),
+                        datasets: [{
+                            label: 'Avg Hit Rate (%)',
+                            data: sortedLenses.map(l => l.avg_hit_rate),
+                            backgroundColor: sortedLenses.map((l, i) => i === 0 ? 'rgba(34, 197, 94, 0.8)' : 'rgba(59, 130, 246, 0.8)'),
+                            borderWidth: 1
+                        }]
+                    },
+                    options: {
+                        indexAxis: 'y',
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: { legend: { display: false } },
+                        scales: {
+                            x: { 
+                                beginAtZero: true, 
+                                max: 100,
+                                title: { display: true, text: 'Hit Rate (%)', color: '#9ca3af' },
+                                grid: { color: 'rgba(75, 85, 99, 0.2)' },
+                                ticks: { color: '#9ca3af' }
+                            },
+                            y: { 
+                                grid: { display: false },
+                                ticks: { color: '#9ca3af' }
+                            }
+                        }
+                    }
+                });
+            }
+        }
+        
+        // Time of day chart
+        if (correlations.by_time_of_day && correlations.by_time_of_day.length > 0) {
+            const ctx = document.getElementById('chart-corr-time');
+            if (ctx) {
+                const timeOrder = ['Morning', 'Afternoon', 'Evening', 'Night'];
+                const sortedTime = timeOrder
+                    .map(t => correlations.by_time_of_day.find(item => item.name === t))
+                    .filter(Boolean);
+                
+                new Chart(ctx.getContext('2d'), {
+                    type: 'bar',
+                    data: {
+                        labels: sortedTime.map(t => t.name),
+                        datasets: [{
+                            label: 'Avg Hit Rate (%)',
+                            data: sortedTime.map(t => t.avg_hit_rate),
+                            backgroundColor: 'rgba(251, 146, 60, 0.8)',
+                            borderWidth: 1
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: { legend: { display: false } },
+                        scales: {
+                            y: { 
+                                beginAtZero: true, 
+                                max: 100,
+                                title: { display: true, text: 'Hit Rate (%)', color: '#9ca3af' },
+                                grid: { color: 'rgba(75, 85, 99, 0.2)' },
+                                ticks: { color: '#9ca3af' }
+                            },
+                            x: { 
+                                grid: { display: false },
+                                ticks: { color: '#9ca3af' }
+                            }
+                        }
+                    }
+                });
+            }
+        }
+        
+        // ISO chart
+        if (correlations.by_iso && correlations.by_iso.length > 0) {
+            const ctx = document.getElementById('chart-corr-iso');
+            if (ctx) {
+                const isoOrder = ['Low (<=400)', 'Medium (401-1600)', 'High (1601-6400)', 'Very High (>6400)'];
+                const sortedIso = isoOrder
+                    .map(iso => correlations.by_iso.find(item => item.name === iso))
+                    .filter(Boolean);
+                
+                new Chart(ctx.getContext('2d'), {
+                    type: 'bar',
+                    data: {
+                        labels: sortedIso.map(i => i.name),
+                        datasets: [{
+                            label: 'Avg Hit Rate (%)',
+                            data: sortedIso.map(i => i.avg_hit_rate),
+                            backgroundColor: 'rgba(14, 165, 233, 0.8)',
+                            borderWidth: 1
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: { legend: { display: false } },
+                        scales: {
+                            y: { 
+                                beginAtZero: true, 
+                                max: 100,
+                                title: { display: true, text: 'Hit Rate (%)', color: '#9ca3af' },
+                                grid: { color: 'rgba(75, 85, 99, 0.2)' },
+                                ticks: { color: '#9ca3af' }
+                            },
+                            x: { 
+                                grid: { display: false },
+                                ticks: { color: '#9ca3af' }
+                            }
+                        }
+                    }
+                });
+            }
+        }
+        
+        // Day of week chart
+        if (correlations.by_day_of_week && correlations.by_day_of_week.length > 0) {
+            const ctx = document.getElementById('chart-corr-day');
+            if (ctx) {
+                const dayOrder = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+                const sortedDays = dayOrder
+                    .map(d => correlations.by_day_of_week.find(item => item.name === d))
+                    .filter(Boolean);
+                
+                new Chart(ctx.getContext('2d'), {
+                    type: 'bar',
+                    data: {
+                        labels: sortedDays.map(d => d.name.substring(0, 3)),
+                        datasets: [{
+                            label: 'Avg Hit Rate (%)',
+                            data: sortedDays.map(d => d.avg_hit_rate),
+                            backgroundColor: 'rgba(168, 85, 247, 0.8)',
+                            borderWidth: 1
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: { legend: { display: false } },
+                        scales: {
+                            y: { 
+                                beginAtZero: true, 
+                                max: 100,
+                                title: { display: true, text: 'Hit Rate (%)', color: '#9ca3af' },
+                                grid: { color: 'rgba(75, 85, 99, 0.2)' },
+                                ticks: { color: '#9ca3af' }
+                            },
+                            x: { 
+                                grid: { display: false },
+                                ticks: { color: '#9ca3af' }
+                            }
+                        }
+                    }
+                });
+            }
+        }
+    }, 100);
 }

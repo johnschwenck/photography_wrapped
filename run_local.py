@@ -34,7 +34,6 @@ from extractors import ExifExtractor
 from analyzers import StatisticsAnalyzer
 from reporters import TextReporter
 from database import DatabaseManager
-from analyzers.analyze_temporal_trends import analyze_temporal_trends
 
 # Setup logging
 logging.basicConfig(
@@ -2007,6 +2006,428 @@ def list_groups():
         
     except Exception as e:
         logger.error(f"Error in list_groups: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/analyze/trends', methods=['POST'])
+def analyze_trends():
+    """
+    Analyze trends over time - hit rate progression, lens usage evolution, volume trends.
+    
+    Request body:
+        filters: Optional filters to apply (category, group, etc.)
+    
+    Returns:
+        JSON with trend data for charts
+    """
+    import re
+    import statistics
+    from collections import defaultdict
+    
+    try:
+        data = request.get_json() or {}
+        filters = data.get('filters', {})
+        
+        db = DatabaseManager.from_config(CONFIG_PATH)
+        conn = db.conn
+        
+        # Get all sessions
+        all_sessions = conn.execute("SELECT * FROM sessions ORDER BY date, name").fetchall()
+        
+        # Apply category/group filters if present
+        if filters.get('category'):
+            categories = filters['category'] if isinstance(filters['category'], list) else [filters['category']]
+            all_sessions = [s for s in all_sessions if s['category'] in categories]
+        if filters.get('group'):
+            groups = filters['group'] if isinstance(filters['group'], list) else [filters['group']]
+            all_sessions = [s for s in all_sessions if s['group_name'] in groups]
+        
+        # Extract dates from sessions - try session date first, then parse from name
+        date_pattern = r'(\d{4}-\d{2}-\d{2})'
+        dated_sessions = []
+        
+        for session in all_sessions:
+            session_date = None
+            
+            # Try session date field first
+            if session['date']:
+                try:
+                    date_str = str(session['date']).split('T')[0].split(' ')[0]
+                    if re.match(r'\d{4}-\d{2}-\d{2}', date_str):
+                        session_date = date_str
+                except:
+                    pass
+            
+            # Fall back to parsing from session name
+            if not session_date:
+                match = re.search(date_pattern, session['name'])
+                if match:
+                    session_date = match.group(1)
+            
+            if session_date:
+                dated_sessions.append({
+                    'id': session['id'],
+                    'name': session['name'],
+                    'date': session_date,
+                    'month': session_date[:7],
+                    'hit_rate': session['hit_rate'],
+                    'total_photos': session['total_photos'] or 0,
+                    'total_raw_photos': session['total_raw_photos'] or 0
+                })
+        
+        if not dated_sessions:
+            return jsonify({
+                'success': True,
+                'trends': {
+                    'message': 'No dated sessions found for trend analysis'
+                }
+            })
+        
+        # Sort by date
+        dated_sessions.sort(key=lambda x: x['date'])
+        
+        # Group by month
+        monthly_data = defaultdict(lambda: {
+            'sessions': 0,
+            'photos': 0,
+            'raw_photos': 0,
+            'hit_rate_sum': 0,
+            'hit_rate_count': 0,
+            'lenses': defaultdict(int),
+            'cameras': defaultdict(int)
+        })
+        
+        # Get session IDs for photo queries
+        session_ids = [s['id'] for s in dated_sessions]
+        session_month_map = {s['id']: s['month'] for s in dated_sessions}
+        
+        # Get photo data for all relevant sessions
+        if session_ids:
+            placeholders = ','.join('?' * len(session_ids))
+            photo_data = conn.execute(f"""
+                SELECT session_id, lens_name, camera
+                FROM photos
+                WHERE session_id IN ({placeholders})
+            """, session_ids).fetchall()
+            
+            for photo in photo_data:
+                month = session_month_map.get(photo['session_id'])
+                if month:
+                    if photo['lens_name']:
+                        monthly_data[month]['lenses'][photo['lens_name']] += 1
+                    if photo['camera']:
+                        monthly_data[month]['cameras'][photo['camera']] += 1
+        
+        # Aggregate session data by month
+        for session in dated_sessions:
+            month = session['month']
+            monthly_data[month]['sessions'] += 1
+            monthly_data[month]['photos'] += session['total_photos']
+            monthly_data[month]['raw_photos'] += session['total_raw_photos']
+            
+            if session['hit_rate'] is not None:
+                monthly_data[month]['hit_rate_sum'] += session['hit_rate']
+                monthly_data[month]['hit_rate_count'] += 1
+        
+        months = sorted(monthly_data.keys())
+        
+        # Build hit rate trend
+        hit_rate_trend = []
+        for month in months:
+            data = monthly_data[month]
+            avg_hit_rate = None
+            if data['hit_rate_count'] > 0:
+                avg_hit_rate = round(data['hit_rate_sum'] / data['hit_rate_count'], 1)
+            hit_rate_trend.append({
+                'month': month,
+                'hit_rate': avg_hit_rate,
+                'sessions': data['sessions'],
+                'photos': data['photos']
+            })
+        
+        # Calculate 3-month moving average
+        hit_rate_moving_avg = []
+        for i, item in enumerate(hit_rate_trend):
+            if item['hit_rate'] is not None:
+                window = [h['hit_rate'] for h in hit_rate_trend[max(0, i-2):i+1] if h['hit_rate'] is not None]
+                if window:
+                    hit_rate_moving_avg.append({
+                        'month': item['month'],
+                        'moving_avg': round(sum(window) / len(window), 1)
+                    })
+        
+        # Build lens usage trend (top 5 per month)
+        lens_trend = []
+        for month in months:
+            top_lenses = dict(sorted(monthly_data[month]['lenses'].items(), key=lambda x: x[1], reverse=True)[:5])
+            lens_trend.append({
+                'month': month,
+                'lenses': top_lenses
+            })
+        
+        # Build camera usage trend
+        camera_trend = []
+        for month in months:
+            camera_trend.append({
+                'month': month,
+                'cameras': dict(monthly_data[month]['cameras'])
+            })
+        
+        # Build volume trend
+        volume_trend = []
+        for month in months:
+            data = monthly_data[month]
+            volume_trend.append({
+                'month': month,
+                'sessions': data['sessions'],
+                'photos': data['photos'],
+                'raw_photos': data['raw_photos']
+            })
+        
+        return jsonify({
+            'success': True,
+            'trends': {
+                'hit_rate': hit_rate_trend,
+                'hit_rate_moving_avg': hit_rate_moving_avg,
+                'lens_usage': lens_trend,
+                'camera_usage': camera_trend,
+                'volume': volume_trend,
+                'total_months': len(months),
+                'date_range': {
+                    'start': months[0] if months else None,
+                    'end': months[-1] if months else None
+                }
+            }
+        })
+        
+    except Exception as e:
+        logger.error(f"Error in analyze_trends: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/analyze/correlations', methods=['POST'])
+def analyze_correlations():
+    """
+    Analyze correlations between settings and hit rate.
+    
+    Request body:
+        filters: Optional filters to apply (category, group, etc.)
+        year: Optional year filter (e.g., "2024")
+        month: Optional month filter (e.g., "01" for January)
+    
+    Returns:
+        JSON with correlation data showing which settings correlate with better hit rates
+    """
+    import statistics
+    from collections import defaultdict
+    
+    try:
+        data = request.get_json() or {}
+        filters = data.get('filters', {})
+        year_filter = data.get('year')  # e.g., "2024"
+        month_filter = data.get('month')  # e.g., "01"
+        
+        db = DatabaseManager.from_config(CONFIG_PATH)
+        conn = db.conn
+        
+        # Get available years and months from photos table
+        available_periods = conn.execute("""
+            SELECT DISTINCT 
+                strftime('%Y', date_only) as year,
+                strftime('%m', date_only) as month
+            FROM photos
+            WHERE date_only IS NOT NULL
+            ORDER BY year DESC, month DESC
+        """).fetchall()
+        
+        available_years = sorted(set(p['year'] for p in available_periods if p['year']), reverse=True)
+        available_months = []
+        if year_filter:
+            available_months = sorted(set(p['month'] for p in available_periods if p['year'] == year_filter and p['month']))
+        
+        # Get all sessions with hit rate
+        all_sessions = conn.execute("""
+            SELECT * FROM sessions WHERE hit_rate IS NOT NULL
+        """).fetchall()
+        
+        # Apply category/group filters if present
+        if filters.get('category'):
+            categories = filters['category'] if isinstance(filters['category'], list) else [filters['category']]
+            all_sessions = [s for s in all_sessions if s['category'] in categories]
+        if filters.get('group'):
+            groups = filters['group'] if isinstance(filters['group'], list) else [filters['group']]
+            all_sessions = [s for s in all_sessions if s['group_name'] in groups]
+        
+        # Apply year/month filters - need to filter sessions by their photos' dates
+        if year_filter or month_filter:
+            filtered_session_ids = set()
+            for session in all_sessions:
+                # Check if any photos in this session match the year/month filter
+                date_query = "SELECT DISTINCT session_id FROM photos WHERE session_id = ?"
+                params = [session['id']]
+                
+                if year_filter:
+                    date_query += " AND strftime('%Y', date_only) = ?"
+                    params.append(year_filter)
+                if month_filter:
+                    date_query += " AND strftime('%m', date_only) = ?"
+                    params.append(month_filter)
+                
+                match = conn.execute(date_query, params).fetchone()
+                if match:
+                    filtered_session_ids.add(session['id'])
+            
+            all_sessions = [s for s in all_sessions if s['id'] in filtered_session_ids]
+        
+        if not all_sessions:
+            return jsonify({
+                'success': True,
+                'correlations': {
+                    'message': 'No sessions with hit rate data found'
+                },
+                'available_years': available_years,
+                'available_months': available_months
+            })
+        
+        # Build correlation data structures
+        lens_hit_rates = defaultdict(list)
+        camera_hit_rates = defaultdict(list)
+        aperture_hit_rates = defaultdict(list)
+        iso_hit_rates = defaultdict(list)
+        time_of_day_hit_rates = defaultdict(list)
+        day_of_week_hit_rates = defaultdict(list)
+        
+        # For each session, get photo metadata and associate with session hit rate
+        for session in all_sessions:
+            photos = conn.execute("""
+                SELECT lens_name, camera, aperture, iso, time_only, day_of_week
+                FROM photos WHERE session_id = ?
+            """, (session['id'],)).fetchall()
+            
+            # Track unique settings used in this session
+            session_lenses = set()
+            session_cameras = set()
+            session_apertures = set()
+            session_isos = set()
+            session_times = set()
+            session_days = set()
+            
+            for photo in photos:
+                if photo['lens_name']:
+                    session_lenses.add(photo['lens_name'])
+                if photo['camera']:
+                    session_cameras.add(photo['camera'])
+                if photo['aperture']:
+                    session_apertures.add(str(photo['aperture']))
+                if photo['iso']:
+                    # Bucket ISOs
+                    try:
+                        iso_val = int(photo['iso'])
+                        if iso_val <= 400:
+                            session_isos.add('Low (<=400)')
+                        elif iso_val <= 1600:
+                            session_isos.add('Medium (401-1600)')
+                        elif iso_val <= 6400:
+                            session_isos.add('High (1601-6400)')
+                        else:
+                            session_isos.add('Very High (>6400)')
+                    except:
+                        pass
+                
+                # Time of day
+                if photo['time_only']:
+                    try:
+                        hour = int(str(photo['time_only']).split(':')[0])
+                        if hour < 6:
+                            session_times.add('Night')
+                        elif hour < 12:
+                            session_times.add('Morning')
+                        elif hour < 18:
+                            session_times.add('Afternoon')
+                        else:
+                            session_times.add('Evening')
+                    except:
+                        pass
+                
+                if photo['day_of_week']:
+                    session_days.add(photo['day_of_week'])
+            
+            # Associate session hit rate with each setting used
+            hit_rate = session['hit_rate']
+            for lens in session_lenses:
+                lens_hit_rates[lens].append(hit_rate)
+            for camera in session_cameras:
+                camera_hit_rates[camera].append(hit_rate)
+            for aperture in session_apertures:
+                aperture_hit_rates[aperture].append(hit_rate)
+            for iso in session_isos:
+                iso_hit_rates[iso].append(hit_rate)
+            for time in session_times:
+                time_of_day_hit_rates[time].append(hit_rate)
+            for day in session_days:
+                day_of_week_hit_rates[day].append(hit_rate)
+        
+        def calc_stats(hit_rates_dict, min_samples=3):
+            """Calculate average and std dev for each category."""
+            results = []
+            for key, rates in hit_rates_dict.items():
+                if len(rates) >= min_samples:
+                    avg = round(sum(rates) / len(rates), 1)
+                    std = round(statistics.stdev(rates), 1) if len(rates) > 1 else 0
+                    results.append({
+                        'name': key,
+                        'avg_hit_rate': avg,
+                        'std_dev': std,
+                        'session_count': len(rates),
+                        'min': round(min(rates), 1),
+                        'max': round(max(rates), 1)
+                    })
+            return sorted(results, key=lambda x: x['avg_hit_rate'], reverse=True)
+        
+        correlations = {
+            'by_lens': calc_stats(lens_hit_rates),
+            'by_camera': calc_stats(camera_hit_rates),
+            'by_aperture': calc_stats(aperture_hit_rates, min_samples=2),
+            'by_iso': calc_stats(iso_hit_rates, min_samples=2),
+            'by_time_of_day': calc_stats(time_of_day_hit_rates, min_samples=2),
+            'by_day_of_week': calc_stats(day_of_week_hit_rates, min_samples=2),
+            'total_sessions_analyzed': len(all_sessions)
+        }
+        
+        # Generate insights
+        insights = []
+        
+        # Best/worst lens
+        if correlations['by_lens']:
+            best_lens = correlations['by_lens'][0]
+            worst_lens = correlations['by_lens'][-1]
+            if best_lens['avg_hit_rate'] - worst_lens['avg_hit_rate'] > 5:
+                insights.append(f"Your best performing lens is {best_lens['name']} ({best_lens['avg_hit_rate']}% hit rate), while {worst_lens['name']} has the lowest ({worst_lens['avg_hit_rate']}%).")
+        
+        # Time of day insight
+        if correlations['by_time_of_day']:
+            best_time = correlations['by_time_of_day'][0]
+            insights.append(f"You tend to get the best results during {best_time['name']} ({best_time['avg_hit_rate']}% hit rate).")
+        
+        # ISO insight
+        if correlations['by_iso']:
+            iso_sorted = sorted(correlations['by_iso'], key=lambda x: x['avg_hit_rate'], reverse=True)
+            best_iso = iso_sorted[0]
+            insights.append(f"Your hit rate is highest at {best_iso['name']} ISO ({best_iso['avg_hit_rate']}%).")
+        
+        correlations['insights'] = insights
+        
+        return jsonify({
+            'success': True,
+            'correlations': correlations,
+            'available_years': available_years,
+            'available_months': available_months,
+            'selected_year': year_filter,
+            'selected_month': month_filter
+        })
+        
+    except Exception as e:
+        logger.error(f"Error in analyze_correlations: {e}", exc_info=True)
         return jsonify({'error': str(e)}), 500
 
 
